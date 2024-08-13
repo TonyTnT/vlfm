@@ -15,6 +15,10 @@ from vlfm.policy.utils.acyclic_enforcer import AcyclicEnforcer
 from vlfm.utils.geometry_utils import closest_point_within_threshold
 from vlfm.vlm.blip2itm import BLIP2ITMClient
 from vlfm.vlm.detections import ObjectDetections
+from vlfm.vlm.ssa import SSAClient
+
+from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
+from sentence_transformers import SentenceTransformer
 
 try:
     from habitat_baselines.common.tensor_dict import TensorDict
@@ -431,3 +435,50 @@ class ITMPolicyV4(BaseITMPolicy):
     ) -> Tuple[np.ndarray, List[float]]:
         sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5)
         return sorted_frontiers, sorted_values
+
+
+
+# v2 + seg objs, calculate embedding similarity
+class ITMPolicyV5(ITMPolicyV2):
+    
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._ssa = SSAClient(port=12185)
+        self._word2vec = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
+
+
+    def _update_value_map(self) -> None:
+
+        def cosine_similarity(embedding1, embedding2):
+            # 计算两个向量的点积
+            dot_product = np.dot(embedding1, embedding2)
+            # 计算两个向量的模长
+            norm_embedding1 = np.linalg.norm(embedding1)
+            norm_embedding2 = np.linalg.norm(embedding2)
+            # 计算余弦相似度
+            similarity = dot_product / (norm_embedding1 * norm_embedding2)
+            return similarity
+
+        all_rgb = [i[0] for i in self._observations_cache["value_map_rgbd"]]
+        similarity_per_img = []
+        for rgb in all_rgb:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask)
+
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            label_embeddings = self._word2vec.encode(labels, show_progress_bar = False)
+            target_embedding = self._word2vec.encode(self._target_object, show_progress_bar = False)
+            cosine_similarities = [cosine_similarity(target_embedding, label_embedding) for label_embedding in label_embeddings]
+            similarity_per_img.append([np.mean(cosine_similarities)])
+            print(f"Current view, get items: {labels}")
+        for similirity, (rgb, depth, tf, min_depth, max_depth, fov) in zip(
+            similarity_per_img, self._observations_cache["value_map_rgbd"]
+        ):
+            self._value_map.update_map(np.array(similirity), depth, tf, min_depth, max_depth, fov)
+
+        self._value_map.update_agent_traj(
+            self._observations_cache["robot_xy"],
+            self._observations_cache["robot_heading"],
+        )

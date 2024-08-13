@@ -60,11 +60,31 @@ def image_to_str(img_np: np.ndarray, quality: float = 90.0) -> str:
     img_str = base64.b64encode(buffer).decode("utf-8")
     return img_str
 
+def uint8_arr_to_str(img_np: np.ndarray) -> str:
+    # 序列化为字节串
+    byte_array = img_np.tobytes()
+    # 使用 base64 进行编码
+    encoded_string = base64.b64encode(byte_array)
+    # 解码为字符串
+    encoded_string_str = encoded_string.decode('utf-8')
+    return encoded_string_str
+
+def str_to_uint8_arr(encoded_string_str: str, shape: tuple) -> np.ndarray:
+    # 解码为字节串
+    encoded_string = encoded_string_str.encode('utf-8')
+    # 使用 base64 进行解码
+    byte_array = base64.b64decode(encoded_string)
+    # 转换为 np.uint8 数组
+    img_np = np.frombuffer(byte_array, dtype=np.uint8)
+    # 重塑为原始形状
+    img_np = img_np.reshape(shape)
+    return img_np
 
 def str_to_image(img_str: str) -> np.ndarray:
     img_bytes = base64.b64decode(img_str)
     img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
     img_np = cv2.imdecode(img_arr, cv2.IMREAD_ANYCOLOR)
+    print(f"{np.unique(img_arr)} ------------ {np.unique(img_np)}")
     return img_np
 
 
@@ -133,7 +153,7 @@ def _send_request(url: str, **kwargs: Any) -> dict:
         start_time = time.time()
         while True:
             try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=1)
+                resp = requests.post(url, headers=headers, json=payload, timeout=5) # 增加超时时间到5秒
                 if resp.status_code == 200:
                     result = resp.json()
                     break
