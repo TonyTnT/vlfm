@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple, Union
 import cv2
 import numpy as np
 from torch import Tensor
+import torch
 
 from vlfm.mapping.frontier_map import FrontierMap
 from vlfm.mapping.value_map import ValueMap
@@ -21,6 +22,13 @@ except Exception:
     pass
 
 PROMPT_SEPARATOR = "|"
+
+
+class TorchActionIDs:
+    STOP = torch.tensor([[0]], dtype=torch.long)
+    MOVE_FORWARD = torch.tensor([[1]], dtype=torch.long)
+    TURN_LEFT = torch.tensor([[2]], dtype=torch.long)
+    TURN_RIGHT = torch.tensor([[3]], dtype=torch.long)
 
 
 class BaseITMPolicy(BaseObjectNavPolicy):
@@ -314,3 +322,112 @@ class ITMPolicyV3(ITMPolicyV2):
             return explore_values
         else:
             return [v[0] for v in values]
+
+
+
+#  v2 + re_initialize
+class ITMPolicyV4(BaseITMPolicy):
+    
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.initialize_cnt = 0
+        self.skip_reinitialize = False
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        
+        self._update_value_map()
+
+        self._pre_step(observations, masks)
+        object_map_rgbd = self._observations_cache["object_map_rgbd"]
+        detections = [
+            self._update_object_map(rgb, depth, tf, min_depth, max_depth, fx, fy)
+            for (rgb, depth, tf, min_depth, max_depth, fx, fy) in object_map_rgbd
+        ]
+
+        robot_xy = self._observations_cache["robot_xy"]
+        goal = self._get_target_object_location(robot_xy)
+        print("Detected objects:", [d.num_detections for d in detections])
+        if not self._done_initializing:  # Initialize
+            mode = "initialize"
+            pointnav_action = self.initialize()
+        elif goal is None:  # Haven't found target object yet
+            mode = "explore"
+            # 在做 explore 之前 需要 check 一下很近的区域是否有其他 frontiers
+            if not self.skip_reinitialize and self.check_nearby_frontiers(1.5) == True:
+                self._done_initializing = False
+                pointnav_action = self.initialize()
+            else:
+                pointnav_action = self._explore(observations)
+                self.skip_reinitialize = False
+        else:
+            mode = "navigate"
+            pointnav_action = self._pointnav(goal[:2], stop=True)
+
+        action_numpy = pointnav_action.detach().cpu().numpy()[0]
+        if len(action_numpy) == 1:
+            action_numpy = action_numpy[0]
+        print(f"Step: {self._num_steps} | Mode: {mode} | Action: {action_numpy}")
+        self._policy_info.update(self._get_policy_info(detections[0]))
+        self._num_steps += 1
+
+        self._observations_cache = {}
+        self._did_reset = False
+
+        return pointnav_action, rnn_hidden_states
+
+
+    def initialize(self) -> Tensor:
+        """Turn left 30 degrees 12 times to get a 360 view at the beginning"""
+        print("Initialize: --------------------", self.initialize_cnt)
+
+        self._done_initializing = not self.initialize_cnt < 12  # type: ignore
+        self.initialize_cnt = 0 if self._done_initializing else self.initialize_cnt+1
+        self.skip_reinitialize = True if self._done_initializing else False
+        return TorchActionIDs.TURN_LEFT
+    
+    
+    def check_nearby_frontiers(self, threshold=1.0):
+        robot_xy = self._observations_cache["robot_xy"]
+        frontiers = self._observations_cache["frontier_sensor"]
+        nearest_frontier = np.linalg.norm(robot_xy - frontiers[0])
+        close_frontier_cnt = 0
+        for frontier in frontiers:
+            distance = np.linalg.norm(robot_xy - frontier)
+            if distance < nearest_frontier:
+                nearest_frontier = distance
+            if distance < threshold:
+                close_frontier_cnt += 1
+        print(f"Nearest frontier distance: {nearest_frontier:.2f}, Close frontiers count: {close_frontier_cnt}")
+        if close_frontier_cnt > 1:
+            return True
+        else:
+            return False
+
+
+    # from parent BaseITMPolicy
+    def _explore(self, observations: Union[Dict[str, Tensor], "TensorDict"]) -> Tensor:
+        frontiers = self._observations_cache["frontier_sensor"]
+        if np.array_equal(frontiers, np.zeros((1, 2))) or len(frontiers) == 0:
+            print("No frontiers found during exploration, stopping.")
+            return self._stop_action
+        best_frontier, best_value = self._get_best_frontier(observations, frontiers)
+        os.environ["DEBUG_INFO"] = f"Best value: {best_value*100:.2f}%"
+        print(f"Best value: {best_value*100:.2f}%")
+        pointnav_action = self._pointnav(best_frontier, stop=False)
+
+        return pointnav_action
+
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5)
+        return sorted_frontiers, sorted_values

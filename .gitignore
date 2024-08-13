@@ -2,10 +2,14 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+data/*
 # C extensions
 *.so
-
+outputs/*
+tb/*
+video_dir/*
+video_dir_hm3d/*
+temp_output/*
 # Distribution / packaging
 .Python
 build/

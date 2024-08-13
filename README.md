@@ -60,6 +60,28 @@ Follow the original install directions for GroundingDINO, which can be found her
 
 Nothing needs to be done for YOLOv7, but it needs to be cloned into the repo.
 
+
+
+* Should install Mobile SAM follow 
+```
+pip install git+https://github.com/ChaoningZhang/MobileSAM.git
+```
+
+* Prepare weights of Eva-Vit-g for lavis
+
+https://storage.googleapis.com/sfr-vision-language-research/LAVIS/models/BLIP2/eva_vit_g.pth
+
+
+* frontier_exploration 
+```
+ pip install git+https://github.com/naokiyokoyama/frontier_exploration.git
+
+```
+
+* Other pkgs should be installed 
+
+https://github.com/bdaiinstitute/vlfm/issues/32#issuecomment-2151794886
+
 ### Installing GroundingDINO (Only if using conda-installed CUDA)
 Only attempt if the installation instructions in the GroundingDINO repo do not work.
 
