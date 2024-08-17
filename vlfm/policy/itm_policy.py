@@ -328,10 +328,9 @@ class ITMPolicyV3(ITMPolicyV2):
             return [v[0] for v in values]
 
 
-
 #  v2 + re_initialize
 class ITMPolicyV4(BaseITMPolicy):
-    
+
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.initialize_cnt = 0
@@ -346,7 +345,7 @@ class ITMPolicyV4(BaseITMPolicy):
         deterministic: bool = False,
     ) -> Any:
         self._pre_step(observations, masks)
-        
+
         self._update_value_map()
 
         self._pre_step(observations, masks)
@@ -387,20 +386,21 @@ class ITMPolicyV4(BaseITMPolicy):
 
         return pointnav_action, rnn_hidden_states
 
-
     def initialize(self) -> Tensor:
         """Turn left 30 degrees 12 times to get a 360 view at the beginning"""
         print("Initialize: --------------------", self.initialize_cnt)
 
         self._done_initializing = not self.initialize_cnt < 12  # type: ignore
-        self.initialize_cnt = 0 if self._done_initializing else self.initialize_cnt+1
+        self.initialize_cnt = 0 if self._done_initializing else self.initialize_cnt + 1
         self.skip_reinitialize = True if self._done_initializing else False
         return TorchActionIDs.TURN_LEFT
-    
-    
+
     def check_nearby_frontiers(self, threshold=1.0):
         robot_xy = self._observations_cache["robot_xy"]
         frontiers = self._observations_cache["frontier_sensor"]
+        if len(frontiers) == 0:
+            print("No frontiers found during exploration, stopping.")
+            return False
         nearest_frontier = np.linalg.norm(robot_xy - frontiers[0])
         close_frontier_cnt = 0
         for frontier in frontiers:
@@ -415,7 +415,6 @@ class ITMPolicyV4(BaseITMPolicy):
         else:
             return False
 
-
     # from parent BaseITMPolicy
     def _explore(self, observations: Union[Dict[str, Tensor], "TensorDict"]) -> Tensor:
         frontiers = self._observations_cache["frontier_sensor"]
@@ -429,7 +428,6 @@ class ITMPolicyV4(BaseITMPolicy):
 
         return pointnav_action
 
-
     def _sort_frontiers_by_value(
         self, observations: "TensorDict", frontiers: np.ndarray
     ) -> Tuple[np.ndarray, List[float]]:
@@ -437,16 +435,14 @@ class ITMPolicyV4(BaseITMPolicy):
         return sorted_frontiers, sorted_values
 
 
-
 # v2 + seg objs, calculate embedding similarity
 class ITMPolicyV5(ITMPolicyV2):
-    
+
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._ssa = SSAClient(port=12185)
-        self._word2vec = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
-
 
     def _update_value_map(self) -> None:
 
@@ -465,12 +461,14 @@ class ITMPolicyV5(ITMPolicyV2):
         for rgb in all_rgb:
             bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
             mask = self._ssa.segment(bgr)
-            unique_labels = np.unique(mask)
+            unique_labels = np.unique(mask) - 1
 
             labels = [self.id2label[str(label_id)] for label_id in unique_labels]
-            label_embeddings = self._word2vec.encode(labels, show_progress_bar = False)
-            target_embedding = self._word2vec.encode(self._target_object, show_progress_bar = False)
-            cosine_similarities = [cosine_similarity(target_embedding, label_embedding) for label_embedding in label_embeddings]
+            label_embeddings = self._word2vec.encode(labels, show_progress_bar=False)
+            target_embedding = self._word2vec.encode(self._target_object, show_progress_bar=False)
+            cosine_similarities = [
+                cosine_similarity(target_embedding, label_embedding) for label_embedding in label_embeddings
+            ]
             similarity_per_img.append([np.mean(cosine_similarities)])
             print(f"Current view, get items: {labels}")
         for similirity, (rgb, depth, tf, min_depth, max_depth, fov) in zip(
