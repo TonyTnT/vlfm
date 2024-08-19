@@ -19,8 +19,9 @@ class SSAClient:
         seg_mask_str = response["seg_mask"]
         h, w = image.shape[:2]
         seg_mask_str = str_to_uint8_arr(seg_mask_str, (h, w))
+        # avoid id = 0 confilct
+        return seg_mask_str + 1
 
-        return seg_mask_str
 
 if __name__ == "__main__":
     img = cv2.imread("temp_output/rgb_26.png", 1)

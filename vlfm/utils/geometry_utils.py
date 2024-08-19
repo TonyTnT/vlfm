@@ -203,17 +203,43 @@ def closest_point_within_threshold(points_array: np.ndarray, target_point: np.nd
 
 
 def transform_points(transformation_matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
+    """Transforms a set of points using a given transformation matrix.
+
+    Args:
+        transformation_matrix (np.ndarray): A 4x4 transformation matrix.
+        points (np.ndarray): An array of points, accepects Nx3 and Nx4, where each point is a tuple (z, x, y) or (z, x, y, value).
+
+    Returns:
+        np.ndarray: An array of transformed points.
+    """
+    if points.shape[1] == 4:
+        # Separate the points and the category information
+        points_coords = points[:, :3]
+        categories = points[:, 3]
+    else:
+        # No category information
+        points_coords = points
+        categories = None
+
     # Add a homogeneous coordinate of 1 to each point for matrix multiplication
-    homogeneous_points = np.hstack((points, np.ones((points.shape[0], 1))))
+    homogeneous_points = np.hstack((points_coords, np.ones((points_coords.shape[0], 1))))
 
     # Apply the transformation matrix to the points
     transformed_points = np.dot(transformation_matrix, homogeneous_points.T).T
 
     # Remove the added homogeneous coordinate and divide by the last coordinate
-    return transformed_points[:, :3] / transformed_points[:, 3:]
+    transformed_points = transformed_points[:, :3] / transformed_points[:, 3:]
+
+    if categories is not None:
+        # Add the category information back to the transformed points
+        transformed_points = np.hstack((transformed_points, categories.reshape(-1, 1)))
+
+    return transformed_points
 
 
-def get_point_cloud(depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: float) -> np.ndarray:
+def get_point_cloud(
+    depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: float, semantic_mask: np.array = None
+) -> np.ndarray:
     """Calculates the 3D coordinates (x, y, z) of points in the depth image based on
     the horizontal field of view (HFOV), the image width and height, the depth values,
     and the pixel x and y coordinates.
@@ -231,7 +257,11 @@ def get_point_cloud(depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: fl
     z = depth_image[v, u]
     x = (u - depth_image.shape[1] // 2) * z / fx
     y = (v - depth_image.shape[0] // 2) * z / fy
-    cloud = np.stack((z, -x, -y), axis=-1)
+    if semantic_mask is not None:
+        semantic_labels = semantic_mask[v, u]
+        cloud = np.stack((z, -x, -y, semantic_labels), axis=-1)
+    else:
+        cloud = np.stack((z, -x, -y), axis=-1)
 
     return cloud
 

@@ -9,6 +9,7 @@ from torch import Tensor
 import torch
 
 from vlfm.mapping.frontier_map import FrontierMap
+from vlfm.mapping.semantic_map import SemanticMap
 from vlfm.mapping.value_map import ValueMap
 from vlfm.policy.base_objectnav_policy import BaseObjectNavPolicy
 from vlfm.policy.utils.acyclic_enforcer import AcyclicEnforcer
@@ -26,6 +27,31 @@ except Exception:
     pass
 
 PROMPT_SEPARATOR = "|"
+
+HM3D_ID_TO_NAME = ["chair", "bed", "potted plant", "toilet", "tv", "couch"]
+MP3D_ID_TO_NAME = [
+    "chair",
+    "table|dining table|coffee table|side table|desk",  # "table",
+    "framed photograph",  # "picture",
+    "cabinet",
+    "pillow",  # "cushion",
+    "couch",  # "sofa",
+    "bed",
+    "nightstand",  # "chest of drawers",
+    "potted plant",  # "plant",
+    "sink",
+    "toilet",
+    "stool",
+    "towel",
+    "tv",  # "tv monitor",
+    "shower",
+    "bathtub",
+    "counter",
+    "fireplace",
+    "gym equipment",
+    "seating",
+    "clothes",
+]
 
 
 class TorchActionIDs:
@@ -480,3 +506,83 @@ class ITMPolicyV5(ITMPolicyV2):
             self._observations_cache["robot_xy"],
             self._observations_cache["robot_heading"],
         )
+
+
+# v2 + seg frames generating semantic occupancy map
+class ITMPolicyV6(BaseITMPolicy):
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._ssa = SSAClient(port=12185)
+        self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+        self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
+
+        # 150 semantic classes, 6 target classes
+        self.similarity_mat = np.zeros((150, 6))
+        for i in range(150):
+            for j in range(6):
+                self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], HM3D_ID_TO_NAME[j])
+        print(
+            f"Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
+        )
+
+        self._semantic_map = SemanticMap(min_height=0.15, max_height=0.88, agent_radius=0.18, semantic_id=self.id2label)
+
+    def cosine_similarity(self, label, target):
+
+        label_embedding = self._word2vec.encode(label, show_progress_bar=False)
+        target_embedding = self._word2vec.encode(target, show_progress_bar=False)
+        # 计算两个向量的点积
+        dot_product = np.dot(label_embedding, target_embedding)
+        # 计算两个向量的模长
+        norm_embedding1 = np.linalg.norm(label_embedding)
+        norm_embedding2 = np.linalg.norm(target_embedding)
+        # 计算余弦相似度
+        similarity = dot_product / (norm_embedding1 * norm_embedding2)
+        return similarity
+
+    def _update_semantic_map(self) -> None:
+        # all_rgb = [i[0] for i in self._observations_cache["value_map_rgbd"]]
+        for rgb, depth, tf, min_depth, max_depth, fov in self._observations_cache["value_map_rgbd"]:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask) - 1
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            print(f"Current view, get items: {labels}")
+
+            self._semantic_map.update_map(
+                depth, mask, tf, self._min_depth, self._max_depth, self._fx, self._fy, self._camera_fov
+            )
+
+    def _update_value_map(self) -> None:
+        target_id = HM3D_ID_TO_NAME.index(self._target_object)
+        self._value_map.generate_from_semantic_map(self._semantic_map._map, self.similarity_mat, target_id)
+
+        self._value_map.update_agent_traj(
+            self._observations_cache["robot_xy"],
+            self._observations_cache["robot_heading"],
+        )
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        #
+        self._update_semantic_map()
+        # semantic map -> value map
+        self._update_value_map()
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5)
+        return sorted_frontiers, sorted_values
+
+    def _reset(self) -> None:
+        self._semantic_map.reset()
+        super()._reset()

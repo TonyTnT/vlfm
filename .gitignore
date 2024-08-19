@@ -7,8 +7,8 @@ data/*
 *.so
 outputs/*
 tb/*
-video_dir/*
-video_dir_hm3d/*
+video_dir*/*
+value_map_recordings/*
 temp_output/*
 # Distribution / packaging
 .Python

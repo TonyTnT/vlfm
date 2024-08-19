@@ -53,7 +53,7 @@ habitat_baselines:
   rl:
 
     policy:
-      name: "HabitatITMPolicyV2"
+      name: "HabitatITMPolicyV6"
 
     ppo:
       # ppo params
