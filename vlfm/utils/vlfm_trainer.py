@@ -4,6 +4,7 @@ import os
 from collections import defaultdict
 from typing import Any, Dict, List
 
+import re
 import numpy as np
 import torch
 import tqdm
@@ -151,7 +152,7 @@ class VLFMTrainer(PPOTrainer):
                 number_of_eval_episodes = total_num_eps
             else:
                 assert evals_per_ep == 1
-                
+
         logger.info(f"Number of evaluation episodes: {number_of_eval_episodes}")
         logger.info(f"Number of eval for each episodes: {evals_per_ep}")
         assert number_of_eval_episodes > 0, "You must specify a number of evaluation episodes with test_episode_count"
@@ -285,11 +286,13 @@ class VLFMTrainer(PPOTrainer):
 
                     if len(self.config.habitat_baselines.eval.video_option) > 0:
                         rgb_frames[i] = hab_vis.flush_frames(failure_cause)
+                        match = re.search(r"val/([^/]+)/", current_episodes_info[i].scene_id)
+                        extracted_id = match.group(1)
                         generate_video(
                             video_option=self.config.habitat_baselines.eval.video_option,
                             video_dir=self.config.habitat_baselines.video_dir,
                             images=rgb_frames[i],
-                            episode_id=current_episodes_info[i].episode_id,
+                            episode_id=f"{extracted_id}_{current_episodes_info[i].episode_id}",
                             checkpoint_idx=checkpoint_index,
                             metrics=extract_scalars_from_info(infos[i]),
                             fps=self.config.habitat_baselines.video_fps,
