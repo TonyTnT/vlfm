@@ -145,23 +145,20 @@ class ValueMap(BaseMap):
 
     def generate_from_semantic_map(self, semantic_map: "SemanticMap", semantic_similarity_mat: np.array, target_id) -> None:  # type: ignore # noqa: F821
         """Generates a value map from a semantic map and a similarity matrix."""
-        value_map = np.zeros((self.size, self.size))
+        # Adjust class_id to be zero-based
+        class_ids = semantic_map - 1
+        # Create a mask for invalid class_ids, uint8 0-1=255
+        invalid_mask = class_ids == 255
+        # Initialize value_map with zeros
+        value_map = np.zeros_like(semantic_map, dtype=float)
+        # Use advanced indexing to fill in the valid similarity values
+        valid_mask = ~invalid_mask
+        value_map[valid_mask] = semantic_similarity_mat[class_ids[valid_mask], target_id]
 
-        # Iterate over each element in the semantic map
-        for i in range(self.size):
-            for j in range(self.size):
-                class_id = semantic_map[i][j] - 1
-                if class_id == -1:
-                    similarity_value = 0
-                else:
-                    similarity_value = semantic_similarity_mat[class_id][target_id]
-                value_map[i][j] = similarity_value
+        # Expand dimensions to match the expected output shape
+        self._value_map = np.expand_dims(value_map, axis=2)
 
-        smoothed_map = np.expand_dims(value_map, axis=2)
-        # Store the generated value map in the instance variable
-        self._value_map = smoothed_map
-
-        return self._value_map
+        return
 
     def sort_waypoints(
         self, waypoints: np.ndarray, radius: float, reduce_fn: Optional[Callable] = None

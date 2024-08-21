@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 from torch import Tensor
 import torch
+import time
 
 from vlfm.mapping.frontier_map import FrontierMap
 from vlfm.mapping.semantic_map import SemanticMap
@@ -571,9 +572,7 @@ class ITMPolicyV6(BaseITMPolicy):
         deterministic: bool = False,
     ) -> Any:
         self._pre_step(observations, masks)
-        #
         self._update_semantic_map()
-        # semantic map -> value map
         self._update_value_map()
         return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
 

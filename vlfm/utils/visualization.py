@@ -2,8 +2,11 @@
 
 from typing import List
 
+import os
 import cv2
 import numpy as np
+
+from vlfm.policy.itm_policy import BaseITMPolicy
 
 
 def add_text_to_image(image: np.ndarray, text: str, top: bool = False) -> np.ndarray:
@@ -132,6 +135,29 @@ def pad_images(images: List[np.ndarray], pad_from_top: bool = False) -> List[np.
         padded_images.append(padded_img)
 
     return padded_images
+
+
+def vis_val_obs_sem(policy: BaseITMPolicy):
+
+    import matplotlib.pyplot as plt
+
+    value_map = policy._value_map.visualize(obstacle_map=policy._value_map._obstacle_map)
+    obstacle_map = policy._obstacle_map.visualize()
+    semantic_map = policy._semantic_map.visualize()
+    fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+    axs[0].imshow(value_map)
+    axs[0].set_title("Value Map")
+    axs[0].axis("off")
+    axs[1].imshow(obstacle_map)
+    axs[1].set_title("Obstacle Map")
+    axs[1].axis("off")
+    axs[2].imshow(semantic_map)
+    axs[2].set_title("Semantic Map")
+    axs[2].axis("off")
+
+    if not os.path.exists("temp_output/val_obs_sem_pv6_{policy._num_steps}.png"):
+        plt.savefig(f"temp_output/val_obs_sem_pv6_{policy._num_steps}.png", dpi=300, bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
