@@ -4,6 +4,7 @@ import os
 from collections import defaultdict
 from typing import Any, Dict, List
 
+import cv2
 import re
 import numpy as np
 import torch
@@ -248,10 +249,14 @@ class VLFMTrainer(PPOTrainer):
                     envs_to_pause.append(i)
                 elif int(next_episodes_info[i].episode_id) == 123123123:
                     envs_to_pause.append(i)
-
+                skip_video_save = False
                 if len(self.config.habitat_baselines.eval.video_option) > 0:
-                    hab_vis.collect_data(batch, infos, action_data.policy_info)
-
+                    try:
+                        hab_vis.collect_data(batch, infos, action_data.policy_info)
+                    except Exception as e:
+                        logger.error(f"Error collecting data for video: {e}")
+                        skip_video_save = True
+                        pass
                 # episode ended
                 if not not_done_masks[i].item():
                     pbar.update()
@@ -284,24 +289,58 @@ class VLFMTrainer(PPOTrainer):
                     except Exception:
                         failure_cause = "Unknown"
 
-                    if len(self.config.habitat_baselines.eval.video_option) > 0:
+                    if (not skip_video_save) and (len(self.config.habitat_baselines.eval.video_option) > 0):
                         rgb_frames[i] = hab_vis.flush_frames(failure_cause)
                         match = re.search(r"val/([^/]+)/", current_episodes_info[i].scene_id)
                         extracted_id = match.group(1)
-                        generate_video(
-                            video_option=self.config.habitat_baselines.eval.video_option,
-                            video_dir=self.config.habitat_baselines.video_dir,
-                            images=rgb_frames[i],
-                            episode_id=f"{extracted_id}_{current_episodes_info[i].episode_id}",
-                            checkpoint_idx=checkpoint_index,
-                            metrics=extract_scalars_from_info(infos[i]),
-                            fps=self.config.habitat_baselines.video_fps,
-                            tb_writer=writer,
-                            keys_to_include_in_name=self.config.habitat_baselines.eval_keys_to_include_in_name,
-                        )
 
+                        if "image" in self.config.habitat_baselines.eval.video_option:
+                            if len(rgb_frames[i]) > 0:
+                                metrics = extract_scalars_from_info(infos[i])
+                                folder_path = os.path.join(
+                                    self.config.habitat_baselines.video_dir,
+                                    f"{extracted_id}_{current_episodes_info[i].episode_id}_spl_{metrics['spl']:.2f}",
+                                )
+                                os.makedirs(folder_path, exist_ok=True)
+                                for j, frame in enumerate(rgb_frames[i]):
+                                    image_path = os.path.join(folder_path, f"frame_{j:04d}.png")
+                                    cv2.imwrite(image_path, frame)
+
+                        if "disk" in self.config.habitat_baselines.eval.video_option:
+                            generate_video(
+                                video_option=self.config.habitat_baselines.eval.video_option,
+                                video_dir=self.config.habitat_baselines.video_dir,
+                                images=rgb_frames[i],
+                                episode_id=f"{extracted_id}_{current_episodes_info[i].episode_id}",
+                                checkpoint_idx=checkpoint_index,
+                                metrics=extract_scalars_from_info(infos[i]),
+                                fps=self.config.habitat_baselines.video_fps,
+                                tb_writer=writer,
+                                keys_to_include_in_name=self.config.habitat_baselines.eval_keys_to_include_in_name,
+                            )
                         rgb_frames[i] = []
 
+                        # Define the path to the CSV file
+                        csv_file = os.path.join(self.config.habitat_baselines.video_dir, "metrics.csv")
+                        # Add metrics to write
+                        metrics["scene_id"] = current_episodes_info[i].scene_id
+                        metrics["episode_id"] = current_episodes_info[i].episode_id
+                        metrics["failure_cause"] = failure_cause
+                        metrics["extracted_id"] = extracted_id
+
+                        # Check if the CSV file exists
+                        file_exists = os.path.isfile(csv_file)
+
+                        # Open the CSV file in append mode
+                        with open(csv_file, "a") as f:
+                            writer = csv.DictWriter(f, fieldnames=metrics.keys())
+
+                            # Write the header row if the file doesn't exist
+                            if not file_exists:
+                                writer.writeheader()
+
+                            # Write the metrics as a new row
+                            writer.writerow(metrics)
                     gfx_str = infos[i].get(GfxReplayMeasure.cls_uuid, "")
                     if gfx_str != "":
                         write_gfx_replay(
