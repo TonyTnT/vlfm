@@ -35,10 +35,14 @@ class SemanticMap(BaseMap):
         size: int = 1000,
         pixels_per_meter: int = 20,
         semantic_id: dict = None,
+        multi_channel: int = 0,
     ):
         super().__init__(size, pixels_per_meter)
+        self.multi_channel = multi_channel
         self.explored_area = np.zeros((size, size), dtype=bool)
         self._map = np.zeros((size, size), dtype=np.dtype("uint8"))
+        if self.multi_channel > 2:
+            self._map = np.zeros((*self._map.shape, self.multi_channel), dtype=np.dtype("uint8"))
         self._navigable_map = np.zeros((size, size), dtype=bool)
         self._min_height = min_height
         self._max_height = max_height
@@ -80,6 +84,7 @@ class SemanticMap(BaseMap):
                 is normalized to the range [0, 1] and has a shape of (height, width).
             semantic (np.ndarray): The mask to use for updating the semantic map. It has the
                 same shape as the depth image, and each value of pixel refers a class id.
+                ID offest 1 comparing to the original ade20k dataset.
             tf_camera_to_episodic (np.ndarray): The transformation matrix from the
                 camera to the episodic coordinate frame.
             min_depth (float): The minimum depth value (in meters) of the depth image.
@@ -91,33 +96,73 @@ class SemanticMap(BaseMap):
             explore (bool): Whether to update the explored area.
             update_obstacles (bool): Whether to update the obstacle map.
         """
-        if update_semantics:
-            if self._hole_area_thresh == -1:
-                filled_depth = depth.copy()
-                filled_depth[depth == 0] = 1.0
-            else:
-                filled_depth = fill_small_holes(depth, self._hole_area_thresh)
-            scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
-            mask = scaled_depth < max_depth
-            semantic_pcd_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy, semantic_mask=semantic)
-            semantic_pcd_episodic_frame = transform_points(tf_camera_to_episodic, semantic_pcd_camera_frame)
-            # 移除指定高度的点 可能存在类别信息丢失
-            obstacle_cloud = filter_points_by_height(semantic_pcd_episodic_frame, self._min_height, self._max_height)
-            semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[3, 5])
-            # Populate topdown map with obstacle locations
-            xy_points = semantic_cloud[:, :2]
-            pixel_points = self._xy_to_px(xy_points)
-            self._map[pixel_points[:, 1], pixel_points[:, 0]] = semantic_cloud[:, 3]
+        if self.multi_channel:
+            # multi-channel semantic map, each channel represents a class
+            if update_semantics:
+                if self._hole_area_thresh == -1:
+                    filled_depth = np.where(depth == 0, 1.0, depth)
+                else:
+                    filled_depth = fill_small_holes(depth, self._hole_area_thresh)
 
-            occupied_area = np.zeros_like(self._map, dtype=np.uint8)
-            occupied_area[self._map >= 1] = 1
-            # Update the navigable area, which is an inverse of the obstacle map after a
-            # dilation operation to accommodate the robot's radius.
-            self._navigable_map = 1 - cv2.dilate(
-                occupied_area.astype(np.uint8),
-                self._navigable_kernel,
-                iterations=1,
-            ).astype(bool)
+                scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
+                mask = scaled_depth < max_depth
+                semantic_pcd_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy, semantic_mask=semantic)
+                semantic_pcd_episodic_frame = transform_points(tf_camera_to_episodic, semantic_pcd_camera_frame)
+
+                # 移除指定高度的点 可能存在类别信息丢失
+                obstacle_cloud = filter_points_by_height(
+                    semantic_pcd_episodic_frame, self._min_height, self._max_height
+                )
+                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[3, 5])
+
+                # Populate topdown map with obstacle locations
+                xy_points = semantic_cloud[:, :2]
+                pixel_points = self._xy_to_px(xy_points)
+                cls_ind = semantic_cloud[:, 3].astype(np.uint8)
+
+                # fix offset for cls id
+                self._map[pixel_points[:, 1], pixel_points[:, 0], cls_ind - 1] = 1
+
+                occupied_area = np.any(self._map[:, :, :] != 0, axis=2).astype(np.uint8)
+
+                # Update the navigable area, which is an inverse of the obstacle map after a
+                # dilation operation to accommodate the robot's radius.
+                self._navigable_map = 1 - cv2.dilate(
+                    occupied_area.astype(np.uint8),
+                    self._navigable_kernel,
+                    iterations=1,
+                ).astype(bool)
+        else:
+            # single-channel semantic map, all classes are merged into one channel, randomly
+            if update_semantics:
+                if self._hole_area_thresh == -1:
+                    filled_depth = depth.copy()
+                    filled_depth[depth == 0] = 1.0
+                else:
+                    filled_depth = fill_small_holes(depth, self._hole_area_thresh)
+                scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
+                mask = scaled_depth < max_depth
+                semantic_pcd_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy, semantic_mask=semantic)
+                semantic_pcd_episodic_frame = transform_points(tf_camera_to_episodic, semantic_pcd_camera_frame)
+                # 移除指定高度的点 可能存在类别信息丢失
+                obstacle_cloud = filter_points_by_height(
+                    semantic_pcd_episodic_frame, self._min_height, self._max_height
+                )
+                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[4, 6])
+                # Populate topdown map with obstacle locations
+                xy_points = semantic_cloud[:, :2]
+                pixel_points = self._xy_to_px(xy_points)
+                self._map[pixel_points[:, 1], pixel_points[:, 0]] = semantic_cloud[:, 3]
+
+                occupied_area = np.zeros_like(self._map, dtype=np.uint8)
+                occupied_area[self._map >= 1] = 1
+                # Update the navigable area, which is an inverse of the obstacle map after a
+                # dilation operation to accommodate the robot's radius.
+                self._navigable_map = 1 - cv2.dilate(
+                    occupied_area.astype(np.uint8),
+                    self._navigable_kernel,
+                    iterations=1,
+                ).astype(bool)
 
         if not explore:
             return
@@ -127,7 +172,7 @@ class SemanticMap(BaseMap):
         agent_pixel_location = self._xy_to_px(agent_xy_location.reshape(1, 2))[0]
         new_explored_area = reveal_fog_of_war(
             top_down_map=self._navigable_map.astype(np.uint8),
-            current_fog_of_war_mask=np.zeros_like(self._map, dtype=np.uint8),
+            current_fog_of_war_mask=np.zeros((self._map.shape[0], self._map.shape[1]), dtype=np.uint8),
             current_point=agent_pixel_location[::-1],
             current_angle=-extract_yaw(tf_camera_to_episodic),
             fov=np.rad2deg(topdown_fov),
@@ -182,17 +227,19 @@ class SemanticMap(BaseMap):
     def visualize(self) -> np.ndarray:
         """Visualizes the map. Using different colors for different classes."""
 
-        mask_palette = get_palette(len(self.semantic_id))
+        mask_palette = np.array([(255, 255, 255)] + get_palette(len(self.semantic_id)))
 
         vis_img = np.ones((*self._map.shape[:2], 3), dtype=np.uint8) * 255
         # Draw explored area in light green
         vis_img[self.explored_area == 1] = (200, 255, 200)
-        # Draw unnavigable areas in gray
-        vis_img[self._navigable_map == 0] = self.radius_padding_color
-        # Draw obstacles in black
-        for i, color in enumerate(mask_palette):
-            # +1, avoid origin value confict with wall
-            vis_img[self._map == (i + 1)] = color
+        # +1, avoid origin value confict with wall
+        combined_map = np.argmax(self._map + 1, axis=2)
+        # 将 combined_map 转换为 one-hot 编码矩阵
+        one_hot_map = np.eye(len(mask_palette))[combined_map]
+        # 使用矩阵乘法将 one-hot 编码矩阵与 mask_palette 相乘
+        vis_img[:, :, 0] = np.dot(one_hot_map, mask_palette[:, 0])
+        vis_img[:, :, 1] = np.dot(one_hot_map, mask_palette[:, 1])
+        vis_img[:, :, 2] = np.dot(one_hot_map, mask_palette[:, 2])
         # Draw frontiers in blue (200, 0, 0)
         for frontier in self._frontiers_px:
             cv2.circle(vis_img, tuple([int(i) for i in frontier]), 5, (200, 0, 0), 2)

@@ -143,7 +143,7 @@ class ValueMap(BaseMap):
             with open(JSON_PATH, "w") as f:
                 json.dump(data, f)
 
-    def generate_from_semantic_map(self, semantic_map: "SemanticMap", semantic_similarity_mat: np.array, target_id) -> None:  # type: ignore # noqa: F821
+    def generate_from_semantic_map(self, semantic_map: "SemanticMap", semantic_similarity_mat: np.array, target_id: int) -> None:  # type: ignore # noqa: F821
         """Generates a value map from a semantic map and a similarity matrix."""
         # Adjust class_id to be zero-based
         class_ids = semantic_map - 1
@@ -158,6 +158,34 @@ class ValueMap(BaseMap):
         # Expand dimensions to match the expected output shape
         self._value_map = np.expand_dims(value_map, axis=2)
 
+        return
+
+    def generate_weight_from_semantic_map(self, semantic_map: "SemanticMap", semantic_similarity_mat: np.array, target_id: int) -> None:  # type: ignore # noqa: F821
+        """Generates a weighted-value map from a semantic map and a similarity matrix.
+        Args:
+            semantic_map (SemanticMap): The semantic map.
+            semantic_similarity_mat (np.array): The similarity matrix.
+            target_id (int): The target ID.
+        """
+        similarity = semantic_similarity_mat[:, target_id].reshape(1, 1, -1)
+        semantic_similarity_mat = semantic_map * similarity
+
+        smoothed_semantic_map = np.zeros_like(semantic_similarity_mat)
+        dilate_kernel = np.ones((7, 7), np.uint8)
+        erode_kernel = np.ones((3, 3), np.uint8)
+        gaussian_kernel = (15, 15)
+        for i in range(similarity.shape[0]):
+            if not np.all(semantic_map[:, :, i] == 0):
+                # Create a mask for the current class
+                sim_mask = semantic_similarity_mat[:, :, i] * 255
+                # Remove isolated pixels
+                eroded_map = cv2.erode(sim_mask, erode_kernel, iterations=1)
+                # Dilate
+                dilated_map = cv2.dilate(eroded_map, dilate_kernel, iterations=2)
+                # Smooth
+                smoothed_map = cv2.GaussianBlur(dilated_map, gaussian_kernel, 3)
+                smoothed_semantic_map[:, :, i] = np.maximum(semantic_similarity_mat[:, :, i], smoothed_map / 255)
+        self._value_map = smoothed_semantic_map
         return
 
     def sort_waypoints(

@@ -30,7 +30,7 @@ class ObstacleMap(BaseMap):
         area_thresh: float = 3.0,  # square meters
         hole_area_thresh: int = 100000,  # square pixels
         size: int = 1000,
-        pixels_per_meter: int = 20,
+        pixels_per_meter: int = 20,  # resolution of the map equals 1/20 = 5cm
     ):
         super().__init__(size, pixels_per_meter)
         self.explored_area = np.zeros((size, size), dtype=bool)

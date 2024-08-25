@@ -86,6 +86,8 @@ class BaseITMPolicy(BaseObjectNavPolicy):
         super().__init__(*args, **kwargs)
         self._itm = BLIP2ITMClient(port=int(os.environ.get("BLIP2ITM_PORT", "12182")))
         self._text_prompt = text_prompt
+        self.use_max_confidence = use_max_confidence
+        self.sync_explored_areas = sync_explored_areas
         self._value_map: ValueMap = ValueMap(
             value_channels=len(text_prompt.split(PROMPT_SEPARATOR)),
             use_max_confidence=use_max_confidence,
@@ -518,7 +520,7 @@ class ITMPolicyV6(BaseITMPolicy):
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
         # 150 semantic classes, 6 target classes
-        self.similarity_mat = np.zeros((150, 6))
+        self.similarity_mat = np.zeros((len(self.id2label), len(HM3D_ID_TO_NAME)))
         for i in range(150):
             for j in range(6):
                 self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], HM3D_ID_TO_NAME[j])
@@ -585,3 +587,110 @@ class ITMPolicyV6(BaseITMPolicy):
     def _reset(self) -> None:
         self._semantic_map.reset()
         super()._reset()
+
+
+# v7 adjust occupancy/value map generation
+class ITMPolicyV7(BaseITMPolicy):
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._ssa = SSAClient(port=12185)
+        self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+        self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
+
+        # 150 semantic classes, 6 target classes
+        self.similarity_mat = np.zeros((len(self.id2label), len(HM3D_ID_TO_NAME)))
+        for i in range(len(self.id2label)):
+            for j in range(len(HM3D_ID_TO_NAME)):
+                self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], HM3D_ID_TO_NAME[j])
+        print(
+            f"Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
+        )
+
+        self._semantic_map = SemanticMap(
+            min_height=0.15,
+            max_height=0.88,
+            agent_radius=0.18,
+            semantic_id=self.id2label,
+            multi_channel=len(self.id2label),
+        )
+
+        self._value_map: ValueMap = ValueMap(
+            value_channels=len(self.id2label),
+            use_max_confidence=self.use_max_confidence,
+            obstacle_map=self._obstacle_map if self.sync_explored_areas else None,
+        )
+
+    def cosine_similarity(self, label, target):
+
+        label_embedding = self._word2vec.encode(label, show_progress_bar=False)
+        target_embedding = self._word2vec.encode(target, show_progress_bar=False)
+        # 计算两个向量的点积
+        dot_product = np.dot(label_embedding, target_embedding)
+        # 计算两个向量的模长
+        norm_embedding1 = np.linalg.norm(label_embedding)
+        norm_embedding2 = np.linalg.norm(target_embedding)
+        # 计算余弦相似度
+        similarity = dot_product / (norm_embedding1 * norm_embedding2)
+        return similarity
+
+    def _update_semantic_map(self) -> None:
+        # all_rgb = [i[0] for i in self._observations_cache["value_map_rgbd"]]
+        for rgb, depth, tf, min_depth, max_depth, fov in self._observations_cache["value_map_rgbd"]:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask) - 1
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            print(f"Current view, get items: {labels}")
+
+            self._semantic_map.update_map(
+                depth, mask, tf, self._min_depth, self._max_depth, self._fx, self._fy, self._camera_fov
+            )
+
+    def _update_value_map(self) -> None:
+        target_id = HM3D_ID_TO_NAME.index(self._target_object)
+        self._value_map.generate_weight_from_semantic_map(self._semantic_map._map, self.similarity_mat, target_id)
+
+        self._value_map.update_agent_traj(
+            self._observations_cache["robot_xy"],
+            self._observations_cache["robot_heading"],
+        )
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        start_time = time.time()
+        self._update_semantic_map()
+        end_time = time.time()
+        print(f"Semantic map update time: {end_time - start_time} seconds")
+
+        start_time = time.time()
+        self._update_value_map()
+        end_time = time.time()
+        print(f"Value map update time: {end_time - start_time} seconds")
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(
+            frontiers, 0.5, reduce_fn=lambda i: np.max(i, axis=-1)
+        )
+        return sorted_frontiers, sorted_values
+
+    def _reset(self) -> None:
+        self._semantic_map.reset()
+        super()._reset()
+
+    def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
+        policy_info = super()._get_policy_info(detections)
+        policy_info["semantic_map"] = cv2.cvtColor(
+            self._semantic_map.visualize(),
+            cv2.COLOR_BGR2RGB,
+        )
+        return policy_info

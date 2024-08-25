@@ -4,6 +4,7 @@ import os
 from collections import defaultdict
 from typing import Any, Dict, List
 
+import csv
 import cv2
 import re
 import numpy as np
@@ -81,6 +82,7 @@ class VLFMTrainer(PPOTrainer):
 
         with read_write(config):
             config.habitat.dataset.split = config.habitat_baselines.eval.split
+            config.habitat.dataset.content_scenes = self.config.habitat.dataset.content_scenes
 
         if len(self.config.habitat_baselines.eval.video_option) > 0:
             agent_config = get_agent_config(config.habitat.simulator)
@@ -323,6 +325,7 @@ class VLFMTrainer(PPOTrainer):
                         # Define the path to the CSV file
                         csv_file = os.path.join(self.config.habitat_baselines.video_dir, "metrics.csv")
                         # Add metrics to write
+                        metrics = extract_scalars_from_info(infos[i])
                         metrics["scene_id"] = current_episodes_info[i].scene_id
                         metrics["episode_id"] = current_episodes_info[i].episode_id
                         metrics["failure_cause"] = failure_cause
