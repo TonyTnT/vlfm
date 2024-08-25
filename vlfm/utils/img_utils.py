@@ -82,7 +82,7 @@ def monochannel_to_inferno_rgb(image: np.ndarray) -> np.ndarray:
     # Apply the Inferno colormap
     inferno_colormap = cv2.applyColorMap((normalized_image * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
 
-    return inferno_colormap
+    return 255 - inferno_colormap
 
 
 def resize_images(images: List[np.ndarray], match_dimension: str = "height", use_max: bool = True) -> List[np.ndarray]:

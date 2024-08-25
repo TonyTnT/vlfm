@@ -72,7 +72,7 @@ class HabitatVis:
         self.maps.append(map)
         vis_map_imgs = [
             self._reorient_rescale_habitat_map(infos, policy_info[0][vkey])
-            for vkey in ["obstacle_map", "value_map"]
+            for vkey in ["obstacle_map", "semantic_map", "value_map"]
             if vkey in policy_info[0]
         ]
         if vis_map_imgs:
