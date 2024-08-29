@@ -113,7 +113,7 @@ class SemanticMap(BaseMap):
                 obstacle_cloud = filter_points_by_height(
                     semantic_pcd_episodic_frame, self._min_height, self._max_height
                 )
-                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[3, 5])
+                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[2, 3, 5])
 
                 # Populate topdown map with obstacle locations
                 xy_points = semantic_cloud[:, :2]

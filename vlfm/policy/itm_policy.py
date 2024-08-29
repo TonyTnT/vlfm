@@ -188,11 +188,11 @@ class BaseITMPolicy(BaseObjectNavPolicy):
         self._acyclic_enforcer.add_state_action(robot_xy, best_frontier, top_two_values)
         self._last_value = best_value
         self._last_frontier = best_frontier
-        os.environ["DEBUG_INFO"] += f" Best value: {best_value*100:.2f}%"
+        os.environ["DEBUG_INFO"] += f" Best value: {best_value*100:.2f}% from {sorted_values}"
 
         return best_frontier, best_value
 
-    def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
+    def _get_policy_info(self, detections: ObjectDetections, reduce_fn=None) -> Dict[str, Any]:
         policy_info = super()._get_policy_info(detections)
 
         if not self._visualize:
@@ -223,7 +223,7 @@ class BaseITMPolicy(BaseObjectNavPolicy):
             }
             markers.append((self._last_goal, marker_kwargs))
         policy_info["value_map"] = cv2.cvtColor(
-            self._value_map.visualize(markers, reduce_fn=self._vis_reduce_fn),
+            self._value_map.visualize(markers, reduce_fn=self._vis_reduce_fn if not reduce_fn else reduce_fn),
             cv2.COLOR_BGR2RGB,
         )
 
@@ -515,7 +515,7 @@ class ITMPolicyV5(ITMPolicyV2):
 class ITMPolicyV6(BaseITMPolicy):
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._ssa = SSAClient(port=12185)
+        self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
         self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
@@ -593,7 +593,7 @@ class ITMPolicyV6(BaseITMPolicy):
 class ITMPolicyV7(BaseITMPolicy):
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._ssa = SSAClient(port=12185)
+        self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
         self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
@@ -619,6 +619,9 @@ class ITMPolicyV7(BaseITMPolicy):
             use_max_confidence=self.use_max_confidence,
             obstacle_map=self._obstacle_map if self.sync_explored_areas else None,
         )
+
+        self.reduce_fn = lambda i: np.apply_along_axis(lambda x: np.mean(x[x != -1]), axis=-1, arr=i)
+        self.reduce_fn_vis = lambda i: np.apply_along_axis(lambda x: np.mean(x[x != 0]), axis=-1, arr=i)
 
     def cosine_similarity(self, label, target):
 
@@ -678,9 +681,8 @@ class ITMPolicyV7(BaseITMPolicy):
     def _sort_frontiers_by_value(
         self, observations: "TensorDict", frontiers: np.ndarray
     ) -> Tuple[np.ndarray, List[float]]:
-        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(
-            frontiers, 0.5, reduce_fn=lambda i: np.max(i, axis=-1)
-        )
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5, self.reduce_fn, "max")
+
         return sorted_frontiers, sorted_values
 
     def _reset(self) -> None:
@@ -688,9 +690,19 @@ class ITMPolicyV7(BaseITMPolicy):
         super()._reset()
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
-        policy_info = super()._get_policy_info(detections)
+
+        policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
         policy_info["semantic_map"] = cv2.cvtColor(
             self._semantic_map.visualize(),
             cv2.COLOR_BGR2RGB,
         )
+
         return policy_info
+
+
+# v8 with different reduce_fn
+class ITMPolicyV8(ITMPolicyV7):
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.reduce_fn = lambda i: np.max(i, axis=-1)
+        self.reduce_fn_vis = lambda i: np.max(i, axis=-1)

@@ -322,28 +322,6 @@ class VLFMTrainer(PPOTrainer):
                             )
                         rgb_frames[i] = []
 
-                        # Define the path to the CSV file
-                        csv_file = os.path.join(self.config.habitat_baselines.video_dir, "metrics.csv")
-                        # Add metrics to write
-                        metrics = extract_scalars_from_info(infos[i])
-                        metrics["scene_id"] = current_episodes_info[i].scene_id
-                        metrics["episode_id"] = current_episodes_info[i].episode_id
-                        metrics["failure_cause"] = failure_cause
-                        metrics["extracted_id"] = extracted_id
-
-                        # Check if the CSV file exists
-                        file_exists = os.path.isfile(csv_file)
-
-                        # Open the CSV file in append mode
-                        with open(csv_file, "a") as f:
-                            writer = csv.DictWriter(f, fieldnames=metrics.keys())
-
-                            # Write the header row if the file doesn't exist
-                            if not file_exists:
-                                writer.writeheader()
-
-                            # Write the metrics as a new row
-                            writer.writerow(metrics)
                     gfx_str = infos[i].get(GfxReplayMeasure.cls_uuid, "")
                     if gfx_str != "":
                         write_gfx_replay(
@@ -351,7 +329,32 @@ class VLFMTrainer(PPOTrainer):
                             self.config.habitat.task,
                             current_episodes_info[i].episode_id,
                         )
+                    if not os.path.exists(self.config.habitat_baselines.video_dir):
+                        os.makedirs(self.config.habitat_baselines.video_dir)
+                    # Define the path to the CSV file
+                    csv_file = os.path.join(self.config.habitat_baselines.video_dir, "metrics.csv")
+                    # Add metrics to write
+                    match = re.search(r"val/([^/]+)/", current_episodes_info[i].scene_id)
+                    extracted_id = match.group(1)
+                    metrics = extract_scalars_from_info(infos[i])
+                    metrics["scene_id"] = current_episodes_info[i].scene_id
+                    metrics["episode_id"] = current_episodes_info[i].episode_id
+                    metrics["failure_cause"] = failure_cause
+                    metrics["extracted_id"] = extracted_id
 
+                    # Check if the CSV file exists
+                    file_exists = os.path.isfile(csv_file)
+
+                    # Open the CSV file in append mode
+                    with open(csv_file, "a") as f:
+                        writer = csv.DictWriter(f, fieldnames=metrics.keys())
+
+                        # Write the header row if the file doesn't exist
+                        if not file_exists:
+                            writer.writeheader()
+
+                        # Write the metrics as a new row
+                        writer.writerow(metrics)
             not_done_masks = not_done_masks.to(device=self.device)
             (
                 self.envs,

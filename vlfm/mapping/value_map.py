@@ -169,27 +169,11 @@ class ValueMap(BaseMap):
         """
         similarity = semantic_similarity_mat[:, target_id].reshape(1, 1, -1)
         semantic_similarity_mat = semantic_map * similarity
-
-        smoothed_semantic_map = np.zeros_like(semantic_similarity_mat)
-        dilate_kernel = np.ones((7, 7), np.uint8)
-        erode_kernel = np.ones((3, 3), np.uint8)
-        gaussian_kernel = (15, 15)
-        for i in range(similarity.shape[0]):
-            if not np.all(semantic_map[:, :, i] == 0):
-                # Create a mask for the current class
-                sim_mask = semantic_similarity_mat[:, :, i] * 255
-                # Remove isolated pixels
-                eroded_map = cv2.erode(sim_mask, erode_kernel, iterations=1)
-                # Dilate
-                dilated_map = cv2.dilate(eroded_map, dilate_kernel, iterations=2)
-                # Smooth
-                smoothed_map = cv2.GaussianBlur(dilated_map, gaussian_kernel, 3)
-                smoothed_semantic_map[:, :, i] = np.maximum(semantic_similarity_mat[:, :, i], smoothed_map / 255)
-        self._value_map = smoothed_semantic_map
+        self._value_map = semantic_similarity_mat
         return
 
     def sort_waypoints(
-        self, waypoints: np.ndarray, radius: float, reduce_fn: Optional[Callable] = None
+        self, waypoints: np.ndarray, radius: float, reduce_fn: Optional[Callable] = None, reduction: str = "median"
     ) -> Tuple[np.ndarray, List[float]]:
         """Selects the best waypoint from the given list of waypoints.
 
@@ -205,25 +189,28 @@ class ValueMap(BaseMap):
         """
         radius_px = int(radius * self.pixels_per_meter)
 
-        def get_value(point: np.ndarray) -> Union[float, Tuple[float, ...]]:
+        def get_value(point: np.ndarray, reudction="median") -> Union[float, Tuple[float, ...]]:
             x, y = point
             px = int(-x * self.pixels_per_meter) + self._episode_pixel_origin[0]
             py = int(-y * self.pixels_per_meter) + self._episode_pixel_origin[1]
             point_px = (self._value_map.shape[0] - px, py)
             all_values = [
-                pixel_value_within_radius(self._value_map[..., c], point_px, radius_px)
+                pixel_value_within_radius(self._value_map[..., c], point_px, radius_px, reduction=reudction)
                 for c in range(self._value_channels)
             ]
             if len(all_values) == 1:
                 return all_values[0]
             return tuple(all_values)
 
-        values = [get_value(point) for point in waypoints]
+        values = [get_value(point, reduction) for point in waypoints]
 
         if self._value_channels > 1:
             assert reduce_fn is not None, "Must provide a reduction function when using multiple value channels."
             values = reduce_fn(values)
-
+            # eliminate nans
+            values = np.nan_to_num(values)
+            # eliminate negative values
+            values = np.maximum(values, 0)
         # Use np.argsort to get the indices of the sorted values
         sorted_inds = np.argsort([-v for v in values])  # type: ignore
         sorted_values = [values[i] for i in sorted_inds]
@@ -240,6 +227,7 @@ class ValueMap(BaseMap):
         """Return an image representation of the map"""
         # Must negate the y values to get the correct orientation
         reduced_map = reduce_fn(self._value_map).copy()
+        reduced_map[np.isnan(reduced_map)] = 0
         if obstacle_map is not None:
             reduced_map[obstacle_map.explored_area == 0] = 0
         map_img = np.flipud(reduced_map)
