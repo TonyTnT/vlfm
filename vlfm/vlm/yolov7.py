@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
     # Instantiate model
     # model = YOLOv7(weights="data/yolov7-e6e.pt")
-    # img_path = "data/horses.jpg"
+    # img_path = "data/bus.jpg"
     # img = cv2.imread(img_path)
     # # Convert to RGB
     # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

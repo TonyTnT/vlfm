@@ -3,6 +3,7 @@
 import os
 from typing import Any, Dict, List, Tuple, Union
 
+import functools
 import cv2
 import numpy as np
 from torch import Tensor
@@ -18,6 +19,7 @@ from vlfm.utils.geometry_utils import closest_point_within_threshold
 from vlfm.vlm.blip2itm import BLIP2ITMClient
 from vlfm.vlm.detections import ObjectDetections
 from vlfm.vlm.ssa import SSAClient
+from vlfm.vlm.yolo_world import YOLOWorldClient
 
 from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
 from sentence_transformers import SentenceTransformer
@@ -67,7 +69,8 @@ class BaseITMPolicy(BaseObjectNavPolicy):
     _selected__frontier_color: Tuple[int, int, int] = (0, 255, 255)
     _frontier_color: Tuple[int, int, int] = (0, 0, 255)
     _circle_marker_thickness: int = 2
-    _circle_marker_radius: int = 5
+    # keep same with the aggregation function in ValueMap
+    _circle_marker_radius: int = 15
     _last_value: float = float("-inf")
     _last_frontier: np.ndarray = np.zeros(2)
 
@@ -308,6 +311,41 @@ class ITMPolicyV2(BaseITMPolicy):
         return sorted_frontiers, sorted_values
 
 
+class ITMPolicyV2Plus(BaseITMPolicy):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # using yolo world for both original coco obj detection and open vocab obj detection
+        self._object_detector = YOLOWorldClient(port=int(os.environ.get("YOLOWORLD_PORT", "12186")))
+        # disable grounding dino
+        self._coco_object_detector = None
+
+    def _get_object_detections(self, img: np.ndarray) -> ObjectDetections:
+        target_classes = self._target_object.split("|")
+        detections = self._object_detector.predict(img, target_classes)
+        det_conf_threshold = 0.5
+        detections.filter_by_conf(det_conf_threshold)
+
+        return detections
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_value_map()
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5)
+        return sorted_frontiers, sorted_values
+
+
 class ITMPolicyV3(ITMPolicyV2):
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -451,8 +489,8 @@ class ITMPolicyV4(BaseITMPolicy):
             print("No frontiers found during exploration, stopping.")
             return self._stop_action
         best_frontier, best_value = self._get_best_frontier(observations, frontiers)
-        os.environ["DEBUG_INFO"] = f"Best value: {best_value*100:.2f}%"
-        print(f"Best value: {best_value*100:.2f}%")
+        os.environ["DEBUG_INFO"] = f"Best value: {best_value*100:.2f}% on {best_frontier}"
+        print(f"Best value: {best_value*100:.2f}% on {best_frontier}")
         pointnav_action = self._pointnav(best_frontier, stop=False)
 
         return pointnav_action
@@ -620,8 +658,32 @@ class ITMPolicyV7(BaseITMPolicy):
             obstacle_map=self._obstacle_map if self.sync_explored_areas else None,
         )
 
-        self.reduce_fn = lambda i: np.apply_along_axis(lambda x: np.mean(x[x != -1]), axis=-1, arr=i)
-        self.reduce_fn_vis = lambda i: np.apply_along_axis(lambda x: np.mean(x[x != 0]), axis=-1, arr=i)
+        def optimized_reduce_fn(arr, exclude_value=0):
+            """
+            计算每个元素沿最后一个轴的非零元素和指定数值外的平均值。
+
+            参数:
+            arr (np.ndarray): 输入数组。
+            exclude_value (float): 要排除的指定数值，默认为0。
+
+            返回:
+            result (np.ndarray): 沿最后一个轴的非零元素和指定数值外的平均值。
+            """
+            # 创建一个掩码，标记非零元素和指定数值外的元素
+            mask = arr != exclude_value
+            # 计算非零元素和指定数值外的数量
+            count_valid = np.sum(mask, axis=-1)
+            # 计算非零元素和指定数值外的总和
+            sum_valid = np.sum(arr * mask, axis=-1)
+            # 计算平均值，避免除以零
+            result = np.divide(sum_valid, count_valid, where=count_valid != 0)
+            # 将没有有效元素的位置设置为 0
+            result[count_valid == 0] = 0
+            return result
+
+        self.reduce_fn_vis = optimized_reduce_fn
+        # should pass exclude_value=-1 when called
+        self.reduce_fn = functools.partial(optimized_reduce_fn, exclude_value=-1)
 
     def cosine_similarity(self, label, target):
 
@@ -667,15 +729,9 @@ class ITMPolicyV7(BaseITMPolicy):
         deterministic: bool = False,
     ) -> Any:
         self._pre_step(observations, masks)
-        start_time = time.time()
         self._update_semantic_map()
-        end_time = time.time()
-        print(f"Semantic map update time: {end_time - start_time} seconds")
 
-        start_time = time.time()
         self._update_value_map()
-        end_time = time.time()
-        print(f"Value map update time: {end_time - start_time} seconds")
         return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
 
     def _sort_frontiers_by_value(
@@ -690,13 +746,17 @@ class ITMPolicyV7(BaseITMPolicy):
         super()._reset()
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
-
+        time_start = time.time()
         policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
+        time_end = time.time()
+        print(f"Get policy info time: {time_end - time_start} seconds")
+        time_start = time.time()
         policy_info["semantic_map"] = cv2.cvtColor(
             self._semantic_map.visualize(),
             cv2.COLOR_BGR2RGB,
         )
-
+        time_end = time.time()
+        print(f"Visualize semantic map time: {time_end - time_start} seconds")
         return policy_info
 
 
@@ -706,3 +766,150 @@ class ITMPolicyV8(ITMPolicyV7):
         super().__init__(*args, **kwargs)
         self.reduce_fn = lambda i: np.max(i, axis=-1)
         self.reduce_fn_vis = lambda i: np.max(i, axis=-1)
+
+
+class ITMPolicyV9(ITMPolicyV7):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+
+    def _get_target_object_location(self, position: np.ndarray) -> Union[None, np.ndarray]:
+
+        target_idx = next((key for key, value in self.id2label.items() if value == self._target_object), None)
+
+        if self._object_map.has_object(self._target_object):
+            print(f"Found target object in 【ObjectMap】: {self._target_object}")
+            return self._object_map.get_best_object(self._target_object, position), "ObjectMap"
+        elif target_idx:
+            print(f"【Target】 {self._target_object}[{int(target_idx)}]")
+            if self._semantic_map.has_object(int(target_idx), pixel_thresh=9):
+                print(f"Found target object in 【SemanticMap】: {self._target_object}")
+                return self._semantic_map.get_best_object(int(target_idx), position), "SemanticMap"
+            else:
+                return None, None
+        else:
+            return None, None
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        self._update_value_map()
+
+        # parent act
+        self._pre_step(observations, masks)
+
+        object_map_rgbd = self._observations_cache["object_map_rgbd"]
+        detections = [
+            self._update_object_map(rgb, depth, tf, min_depth, max_depth, fx, fy)
+            for (rgb, depth, tf, min_depth, max_depth, fx, fy) in object_map_rgbd
+        ]
+        robot_xy = self._observations_cache["robot_xy"]
+        goal, source = self._get_target_object_location(robot_xy)
+
+        if not self._done_initializing:  # Initialize
+            mode = "initialize"
+            pointnav_action = self._initialize()
+        elif goal is None:  # Haven't found target object yet
+            mode = "explore"
+            pointnav_action = self._explore(observations)
+        else:
+            if source == "SemanticMap":
+                mode = "explore"
+                stop_flag = False
+            elif source == "ObjectMap":
+                mode = "navigate"
+                stop_flag = True
+            else:
+                Exception("Goal Error")
+            pointnav_action = self._pointnav(goal[:2], stop=stop_flag)
+
+        action_numpy = pointnav_action.detach().cpu().numpy()[0]
+        if len(action_numpy) == 1:
+            action_numpy = action_numpy[0]
+        print(f"Step: {self._num_steps} | Mode: {mode} | Action: {action_numpy}")
+
+        self._policy_info.update(self._get_policy_info(detections[0]))
+
+        self._num_steps += 1
+
+        self._observations_cache = {}
+        self._did_reset = False
+
+        return pointnav_action, rnn_hidden_states
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        WALL_CEILING_FLOOR = [0, 3, 5]
+        target_sim_thresh = self.similarity_mat[WALL_CEILING_FLOOR, HM3D_ID_TO_NAME.index(self._target_object)].mean()
+        # 1. get value for frontiers from semantic value map
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.75, self.reduce_fn, "max")
+        # 2. weighted with distance and density
+        if np.any(np.array(sorted_values) > 0.5):
+            # find obj with high correlated
+            return sorted_frontiers, sorted_values
+        elif np.all(np.array(sorted_values) < target_sim_thresh):
+            print("Arounding frontiers are not with high correlated to the target, searching by the density")
+
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.1, 0.6, 0.3])
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
+        else:
+            print("Arounding frontiers have some similar objects, searching by the similarity")
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.5, 0.3, 0.2])
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
+
+    def get_densities(self, frontiers, radius):
+        """
+        计算每个 frontier 在指定半径内的密度。
+
+        参数:
+        frontiers (np.ndarray): 形状为 (N, 2) 的数组，表示 N 个 frontiers 的坐标。
+        radius (float): 指定的半径。
+
+        返回:
+        densities (np.ndarray): 形状为 (N,) 的数组，表示每个 frontier 的密度。
+        """
+        num_frontiers = frontiers.shape[0]
+        densities = np.zeros(num_frontiers, dtype=int)
+
+        # 计算距离矩阵
+        distance_matrix = np.linalg.norm(frontiers[:, np.newaxis, :] - frontiers[np.newaxis, :, :], axis=2)
+
+        # 计算密度
+        for i in range(num_frontiers):
+            densities[i] = np.sum(distance_matrix[i] <= radius) - 1  # 减去自身
+
+        # 归一化密度
+        if np.max(densities) > 0:
+            normalized_densities = (densities - np.min(densities)) / (np.max(densities) - np.min(densities))
+        else:
+            normalized_densities = densities
+        return normalized_densities
