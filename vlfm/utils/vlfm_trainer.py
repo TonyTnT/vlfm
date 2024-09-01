@@ -293,8 +293,7 @@ class VLFMTrainer(PPOTrainer):
 
                     if (not skip_video_save) and (len(self.config.habitat_baselines.eval.video_option) > 0):
                         rgb_frames[i] = hab_vis.flush_frames(failure_cause)
-                        match = re.search(r"val/([^/]+)/", current_episodes_info[i].scene_id)
-                        extracted_id = match.group(1)
+                        extracted_id = os.path.basename(current_episodes_info[i].scene_id).split(".")[0]
 
                         if "image" in self.config.habitat_baselines.eval.video_option:
                             if len(rgb_frames[i]) > 0:
@@ -332,10 +331,9 @@ class VLFMTrainer(PPOTrainer):
                     if not os.path.exists(self.config.habitat_baselines.video_dir):
                         os.makedirs(self.config.habitat_baselines.video_dir)
                     # Define the path to the CSV file
-                    csv_file = os.path.join(self.config.habitat_baselines.video_dir, "metrics.csv")
+                    extracted_id = os.path.basename(current_episodes_info[i].scene_id).split(".")[0]
+                    csv_file = os.path.join(self.config.habitat_baselines.video_dir, f"{extracted_id}_metrics.csv")
                     # Add metrics to write
-                    match = re.search(r"val/([^/]+)/", current_episodes_info[i].scene_id)
-                    extracted_id = match.group(1)
                     metrics = extract_scalars_from_info(infos[i])
                     metrics["scene_id"] = current_episodes_info[i].scene_id
                     metrics["episode_id"] = current_episodes_info[i].episode_id
