@@ -81,7 +81,8 @@ class YOLOWorld:
         """
         orig_shape = image.shape
         # accept image format with RGB
-        data_info = self.pipeline(dict(img_id=0, img=image, texts=targets))
+        img = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        data_info = self.pipeline(dict(img_id=0, img=img, texts=targets))
         data_batch = dict(
             inputs=data_info["inputs"].unsqueeze(0),
             data_samples=[data_info["data_samples"]],

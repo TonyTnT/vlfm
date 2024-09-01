@@ -170,11 +170,43 @@ class BaseObjectNavPolicy(BasePolicy):
 
     def _get_target_object_location(self, position: np.ndarray) -> Union[None, np.ndarray]:
         if self._object_map.has_object(self._target_object):
+            print(f"Found target object in ObjectMap: {self._target_object}")
             return self._object_map.get_best_object(self._target_object, position)
         else:
             return None
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
+        """
+        获取策略信息的函数。
+
+        参数:
+        - detections: ObjectDetections 对象，包含检测到的物体信息和注释帧。
+
+        返回:
+        - policy_info: 字典，包含策略相关的信息。
+
+        功能:
+        1. 检查目标物体是否存在于对象地图中，如果存在则获取目标点云。
+        2. 构建 policy_info 字典，包含以下信息：
+            - "target_object": 目标物体的名称。
+            - "gps": 机器人当前位置的 GPS 坐标。
+            - "yaw": 机器人的航向角（以度为单位）。
+            - "target_detected": 是否检测到目标物体。
+            - "target_point_cloud": 目标物体的点云数据。
+            - "nav_goal": 最后一个导航目标。
+            - "stop_called": 是否调用了停止命令。
+            - "render_below_images": 不在视频中渲染的图像列表。
+        3. 如果不需要可视化，直接返回 policy_info。
+        4. 如果需要可视化，进行以下操作：
+            - 获取并处理深度图像。
+            - 如果存在物体掩码，则在 RGB 和深度图像上绘制物体轮廓。
+            - 否则，使用缓存的 RGB 图像。
+            - 将注释后的 RGB 和深度图像添加到 policy_info。
+        5. 如果需要计算前沿，添加障碍物地图到 policy_info。
+        6. 如果环境变量中包含 "DEBUG_INFO"，添加调试信息到 policy_info。
+
+        返回 policy_info 字典，包含策略相关的信息。
+        """
         if self._object_map.has_object(self._target_object):
             target_point_cloud = self._object_map.get_target_cloud(self._target_object)
         else:
@@ -202,8 +234,9 @@ class BaseObjectNavPolicy(BasePolicy):
             # If self._object_masks isn't all zero, get the object segmentations and
             # draw them on the rgb and depth images
             contours, _ = cv2.findContours(self._object_masks, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            annotated_rgb = cv2.drawContours(detections.annotated_frame, contours, -1, (255, 0, 0), 2)
-            annotated_depth = cv2.drawContours(annotated_depth, contours, -1, (255, 0, 0), 2)
+            if detections:
+                annotated_rgb = cv2.drawContours(detections.annotated_frame, contours, -1, (255, 0, 0), 2)
+                annotated_depth = cv2.drawContours(annotated_depth, contours, -1, (255, 0, 0), 2)
         else:
             annotated_rgb = self._observations_cache["object_map_rgbd"][0][0]
         policy_info["annotated_rgb"] = annotated_rgb

@@ -8,6 +8,7 @@ from frontier_exploration.utils.fog_of_war import reveal_fog_of_war
 from vlfm.mapping.base_map import BaseMap
 from vlfm.utils.geometry_utils import extract_yaw, get_point_cloud, transform_points
 from vlfm.utils.img_utils import fill_small_holes
+from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
 
 
 class SemanticMap(BaseMap):
@@ -224,22 +225,47 @@ class SemanticMap(BaseMap):
         )
         return frontiers
 
+    def has_object(self, target_ind: int, pixel_thresh: int = 5) -> bool:
+        """
+        判断目标对象是否存在于地图中。
+
+        参数:
+        target_ind (int): 目标对象在地图中的索引。
+        pixel_thresh (int): 判断目标对象存在的像素阈值，默认为5。数值过低可能导致误判。
+
+        返回:
+        bool: 如果目标对象的像素总和大于阈值，则返回True，否则返回False。
+        """
+        return np.sum(self._map[:, :, target_ind]) > pixel_thresh
+
+    def get_best_object(self, target_ind: int, curr_position: np.ndarray) -> np.ndarray:
+        """Returns the best location to navigate to for the target object."""
+        target_map = self._map[:, :, target_ind]
+        # 找到所有值为1的像素点坐标
+        target_coords = np.argwhere(target_map == 1)
+        # 计算所有目标坐标与当前坐标的距离
+        distances = np.linalg.norm(target_coords - curr_position, axis=1)
+        # 找到距离最近的目标坐标
+        nearest_index = np.argmin(distances)
+        nearest_coord = target_coords[nearest_index]
+
+        return nearest_coord
+
     def visualize(self) -> np.ndarray:
         """Visualizes the map. Using different colors for different classes."""
 
-        mask_palette = np.array([(255, 255, 255)] + get_palette(len(self.semantic_id)))
+        mask_palette = np.array(get_palette(len(self.semantic_id)))
 
         vis_img = np.ones((*self._map.shape[:2], 3), dtype=np.uint8) * 255
         # Draw explored area in light green
         vis_img[self.explored_area == 1] = (200, 255, 200)
-        # +1, avoid origin value confict with wall
-        combined_map = np.argmax(self._map + 1, axis=2)
-        # 将 combined_map 转换为 one-hot 编码矩阵
-        one_hot_map = np.eye(len(mask_palette))[combined_map]
-        # 使用矩阵乘法将 one-hot 编码矩阵与 mask_palette 相乘
-        vis_img[:, :, 0] = np.dot(one_hot_map, mask_palette[:, 0])
-        vis_img[:, :, 1] = np.dot(one_hot_map, mask_palette[:, 1])
-        vis_img[:, :, 2] = np.dot(one_hot_map, mask_palette[:, 2])
+
+        # 遍历所有的掩码通道
+        for i in range(self._map.shape[2]):
+            # 找到当前通道掩码值为1的位置
+            mask = self._map[:, :, i] == 1
+            # 将这些位置的 vis_img 值设置为当前通道的颜色
+            vis_img[mask] = mask_palette[i]
         # Draw frontiers in blue (200, 0, 0)
         for frontier in self._frontiers_px:
             cv2.circle(vis_img, tuple([int(i) for i in frontier]), 5, (200, 0, 0), 2)

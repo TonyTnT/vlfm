@@ -33,7 +33,9 @@ from .itm_policy import (
     ITMPolicyV7,
     ITMPolicyV8,
     ITMPolicyV9,
-    ITMPolicyV2Plus,
+    ITMPolicyV2_YOLOWORLD,
+    ITMPolicyV2_YOLOv10,
+    ITMPolicyV9_YOLOv10,
 )
 
 HM3D_ID_TO_NAME = ["chair", "bed", "potted plant", "toilet", "tv", "couch"]
@@ -318,7 +320,17 @@ class HabitatITMPolicyV9(HabitatMixin, ITMPolicyV9):
 
 
 @baseline_registry.register_policy
-class HabitatITMPolicyV2Plus(HabitatMixin, ITMPolicyV2Plus):
+class HabitatITMPolicyV2YOLOWORLD(HabitatMixin, ITMPolicyV2_YOLOWORLD):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV2YOLOv10(HabitatMixin, ITMPolicyV2_YOLOv10):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV9YOLOv10(HabitatMixin, ITMPolicyV9_YOLOv10):
     pass
 
 

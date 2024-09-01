@@ -14,6 +14,7 @@ import numpy as np
 
 from vlfm.mapping.base_map import BaseMap
 from vlfm.utils.geometry_utils import extract_yaw, get_rotation_matrix
+from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
 from vlfm.utils.img_utils import (
     monochannel_to_inferno_rgb,
     pixel_value_within_radius,
@@ -198,19 +199,25 @@ class ValueMap(BaseMap):
                 pixel_value_within_radius(self._value_map[..., c], point_px, radius_px, reduction=reudction)
                 for c in range(self._value_channels)
             ]
+            # valid_indices = np.where(np.array(all_values) != -1)[0]
+            # class_names = [CONFIG_ADE20K_ID2LABEL["id2label"][f"{index}"] for index in valid_indices]
+            # all_values_wonegative = [all_values[i] for i in valid_indices]
+            # result = "\t ".join(
+            #     [f"[{cls_name}: {value: .4f}] " for cls_name, value in zip(class_names, all_values_wonegative)]
+            # )
+            # print(
+            #     f"Current point: [{point[0]:.2f}, {point[1]:.2f}], \t arounding have {len(valid_indices)} classes: {result}"
+            # )
+
             if len(all_values) == 1:
                 return all_values[0]
             return tuple(all_values)
 
         values = [get_value(point, reduction) for point in waypoints]
-
         if self._value_channels > 1:
             assert reduce_fn is not None, "Must provide a reduction function when using multiple value channels."
-            values = reduce_fn(values)
-            # eliminate nans
-            values = np.nan_to_num(values)
-            # eliminate negative values
-            values = np.maximum(values, 0)
+            values = reduce_fn(np.array(values))
+
         # Use np.argsort to get the indices of the sorted values
         sorted_inds = np.argsort([-v for v in values])  # type: ignore
         sorted_values = [values[i] for i in sorted_inds]
@@ -226,8 +233,8 @@ class ValueMap(BaseMap):
     ) -> np.ndarray:
         """Return an image representation of the map"""
         # Must negate the y values to get the correct orientation
-        reduced_map = reduce_fn(self._value_map).copy()
-        reduced_map[np.isnan(reduced_map)] = 0
+        reduced_map = reduce_fn(self._value_map)
+        reduced_map = np.nan_to_num(reduced_map)
         if obstacle_map is not None:
             reduced_map[obstacle_map.explored_area == 0] = 0
         map_img = np.flipud(reduced_map)

@@ -20,6 +20,7 @@ from vlfm.vlm.blip2itm import BLIP2ITMClient
 from vlfm.vlm.detections import ObjectDetections
 from vlfm.vlm.ssa import SSAClient
 from vlfm.vlm.yolo_world import YOLOWorldClient
+from vlfm.vlm.yolov10 import YOLOv10Client
 
 from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
 from sentence_transformers import SentenceTransformer
@@ -311,12 +312,16 @@ class ITMPolicyV2(BaseITMPolicy):
         return sorted_frontiers, sorted_values
 
 
-class ITMPolicyV2Plus(BaseITMPolicy):
+class ITMPolicyV2_YOLOWORLD(BaseITMPolicy):
+    """
+    remove _coco_object_detector, only using yolo world for both original coco obj detection and open vocab obj detection
+    """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        # using yolo world for both original coco obj detection and open vocab obj detection
+        # disable grounding dino, using yolo world for both original coco obj detection and open vocab obj detection
         self._object_detector = YOLOWorldClient(port=int(os.environ.get("YOLOWORLD_PORT", "12186")))
-        # disable grounding dino
+        # remove the original yolov7
         self._coco_object_detector = None
 
     def _get_object_detections(self, img: np.ndarray) -> ObjectDetections:
@@ -326,6 +331,13 @@ class ITMPolicyV2Plus(BaseITMPolicy):
         detections.filter_by_conf(det_conf_threshold)
 
         return detections
+
+
+class ITMPolicyV2_YOLOv10(BaseITMPolicy):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # using yolov10 to replace original yolov7
+        self._coco_object_detector = YOLOv10Client(port=int(os.environ.get("YOLOV10_PORT", "12187")))
 
     def act(
         self,
@@ -913,3 +925,10 @@ class ITMPolicyV9(ITMPolicyV7):
         else:
             normalized_densities = densities
         return normalized_densities
+
+
+class ITMPolicyV9_YOLOv10(ITMPolicyV9):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # using yolov10 to replace original yolov7
+        self._coco_object_detector = YOLOv10Client(port=int(os.environ.get("YOLOV10_PORT", "12187")))
