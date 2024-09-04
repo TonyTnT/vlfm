@@ -332,6 +332,24 @@ class ITMPolicyV2_YOLOWORLD(BaseITMPolicy):
 
         return detections
 
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_value_map()
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.5)
+        return sorted_frontiers, sorted_values
+
 
 class ITMPolicyV2_YOLOv10(BaseITMPolicy):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -758,17 +776,11 @@ class ITMPolicyV7(BaseITMPolicy):
         super()._reset()
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
-        time_start = time.time()
         policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
-        time_end = time.time()
-        print(f"Get policy info time: {time_end - time_start} seconds")
-        time_start = time.time()
         policy_info["semantic_map"] = cv2.cvtColor(
             self._semantic_map.visualize(),
             cv2.COLOR_BGR2RGB,
         )
-        time_end = time.time()
-        print(f"Visualize semantic map time: {time_end - time_start} seconds")
         return policy_info
 
 
@@ -785,7 +797,6 @@ class ITMPolicyV9(ITMPolicyV7):
         super().__init__(*args, **kwargs)
 
     def _get_target_object_location(self, position: np.ndarray) -> Union[None, np.ndarray]:
-
         target_idx = next((key for key, value in self.id2label.items() if value == self._target_object), None)
 
         if self._object_map.has_object(self._target_object):
@@ -793,7 +804,7 @@ class ITMPolicyV9(ITMPolicyV7):
             return self._object_map.get_best_object(self._target_object, position), "ObjectMap"
         elif target_idx:
             print(f"【Target】 {self._target_object}[{int(target_idx)}]")
-            if self._semantic_map.has_object(int(target_idx), pixel_thresh=9):
+            if self._semantic_map.has_object(int(target_idx), pixel_thresh=400):
                 print(f"Found target object in 【SemanticMap】: {self._target_object}")
                 return self._semantic_map.get_best_object(int(target_idx), position), "SemanticMap"
             else:
@@ -861,7 +872,7 @@ class ITMPolicyV9(ITMPolicyV7):
         WALL_CEILING_FLOOR = [0, 3, 5]
         target_sim_thresh = self.similarity_mat[WALL_CEILING_FLOOR, HM3D_ID_TO_NAME.index(self._target_object)].mean()
         # 1. get value for frontiers from semantic value map
-        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 0.75, self.reduce_fn, "max")
+        sorted_frontiers, sorted_values = self._value_map.sort_waypoints(frontiers, 1.0, self.reduce_fn, "max")
         # 2. weighted with distance and density
         if np.any(np.array(sorted_values) > 0.5):
             # find obj with high correlated
@@ -920,10 +931,12 @@ class ITMPolicyV9(ITMPolicyV7):
             densities[i] = np.sum(distance_matrix[i] <= radius) - 1  # 减去自身
 
         # 归一化密度
-        if np.max(densities) > 0:
-            normalized_densities = (densities - np.min(densities)) / (np.max(densities) - np.min(densities))
+        max_density = np.max(densities)
+        if max_density > 0:
+            normalized_densities = (densities - np.min(densities)) / (max_density - np.min(densities))
         else:
             normalized_densities = densities
+        normalized_densities = np.nan_to_num(normalized_densities)
         return normalized_densities
 
 
@@ -932,3 +945,10 @@ class ITMPolicyV9_YOLOv10(ITMPolicyV9):
         super().__init__(*args, **kwargs)
         # using yolov10 to replace original yolov7
         self._coco_object_detector = YOLOv10Client(port=int(os.environ.get("YOLOV10_PORT", "12187")))
+
+
+class ITMPolicyV10(ITMPolicyV9):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.reduce_fn = lambda i: np.max(i, axis=-1)
+        self.reduce_fn_vis = lambda i: np.max(i, axis=-1)

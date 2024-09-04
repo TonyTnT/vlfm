@@ -262,10 +262,7 @@ class SemanticMap(BaseMap):
 
         # 遍历所有的掩码通道
         for i in range(self._map.shape[2]):
-            # 找到当前通道掩码值为1的位置
-            mask = self._map[:, :, i] == 1
-            # 将这些位置的 vis_img 值设置为当前通道的颜色
-            vis_img[mask] = mask_palette[i]
+            vis_img[self._map[:, :, i] == 1] = mask_palette[i]
         # Draw frontiers in blue (200, 0, 0)
         for frontier in self._frontiers_px:
             cv2.circle(vis_img, tuple([int(i) for i in frontier]), 5, (200, 0, 0), 2)

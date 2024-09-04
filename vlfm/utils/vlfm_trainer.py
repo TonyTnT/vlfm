@@ -305,7 +305,7 @@ class VLFMTrainer(PPOTrainer):
                                 os.makedirs(folder_path, exist_ok=True)
                                 for j, frame in enumerate(rgb_frames[i]):
                                     image_path = os.path.join(folder_path, f"frame_{j:04d}.png")
-                                    cv2.imwrite(image_path, frame)
+                                    cv2.imwrite(image_path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
                         if "disk" in self.config.habitat_baselines.eval.video_option:
                             generate_video(

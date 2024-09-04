@@ -33,6 +33,7 @@ from .itm_policy import (
     ITMPolicyV7,
     ITMPolicyV8,
     ITMPolicyV9,
+    ITMPolicyV10,
     ITMPolicyV2_YOLOWORLD,
     ITMPolicyV2_YOLOv10,
     ITMPolicyV9_YOLOv10,
@@ -326,6 +327,11 @@ class HabitatITMPolicyV2YOLOWORLD(HabitatMixin, ITMPolicyV2_YOLOWORLD):
 
 @baseline_registry.register_policy
 class HabitatITMPolicyV2YOLOv10(HabitatMixin, ITMPolicyV2_YOLOv10):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV10(HabitatMixin, ITMPolicyV10):
     pass
 
 
