@@ -1178,7 +1178,7 @@ class ITMPolicyV9Fusion(BaseITMPolicy):
 
 
 class ITMPolicyV11(BaseITMPolicy):
-    # ITMPolicyV9FusionWeightedSemanticMap
+    # ITMPolicyV9Fusion ConfidenceWeightedSemanticMap
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
@@ -1388,17 +1388,49 @@ class ITMPolicyV11(BaseITMPolicy):
         super()._reset()
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
-        policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
-        policy_info["semantic_map"] = cv2.cvtColor(
-            self._semantic_map.visualize(),
-            cv2.COLOR_BGR2RGB,
-        )
-        policy_info["semantic_value_map"] = cv2.cvtColor(
-            self._semantic_value_map.visualize(),
-            cv2.COLOR_BGR2RGB,
-        )
+        # policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
+        # policy_info["semantic_map"] = cv2.cvtColor(
+        #     self._semantic_map.visualize(),
+        #     cv2.COLOR_BGR2RGB,
+        # )
+        # policy_info["semantic_value_map"] = cv2.cvtColor(
+        #     self._semantic_value_map.visualize(),
+        #     cv2.COLOR_BGR2RGB,
+        # )
 
-        return policy_info
+        return {}
+
+
+class ITMPolicyV12(ITMPolicyV11):
+    """
+    ITMPolicyV12 uses the [EqualWeighted] semantic map to update the semantic map.
+    """
+
+    def _update_semantic_map(self) -> None:
+        for rgb, depth, tf, min_depth, max_depth, fov in self._observations_cache["value_map_rgbd"]:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask) - 1
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            self.logger.debug(f"Current view, get items: {labels}")
+            self._semantic_map.update_map(
+                depth, mask, tf, min_depth, max_depth, self._fx, self._fy, fov, weighted="equal_weighted"
+            )
+
+
+class ITMPolicyV13(ITMPolicyV11):
+    """
+    ITMPolicyV13 uses the [Override] semantic map to update the semantic map.
+    """
+
+    def _update_semantic_map(self) -> None:
+        for rgb, depth, tf, min_depth, max_depth, fov in self._observations_cache["value_map_rgbd"]:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask) - 1
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            self.logger.debug(f"Current view, get items: {labels}")
+            self._semantic_map.update_map(depth, mask, tf, min_depth, max_depth, self._fx, self._fy, fov, weighted=None)
 
 
 class ITMPolicyV10(ITMPolicyV9):
