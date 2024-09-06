@@ -1,7 +1,9 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
+import time
 import numpy as np
+import cupy as cp
 from frontier_exploration.frontier_detection import detect_frontier_waypoints
 from frontier_exploration.utils.fog_of_war import reveal_fog_of_war
 
@@ -16,11 +18,11 @@ class SemanticMap(BaseMap):
     are with respect to finding and navigating to the target object."""
 
     _confidence_masks: Dict[Tuple[float, float], np.ndarray] = {}
-    # _camera_positions: List[np.ndarray] = []
-    # _last_camera_yaw: float = 0.0
-    # _min_confidence: float = 0.25
-    # _decision_threshold: float = 0.35
+    _camera_positions: List[np.ndarray] = []
+    _last_camera_yaw: float = 0.0
+    _min_confidence: float = 0.25
     _map: np.ndarray
+    _conf_map: cp.ndarray
     _map_dtype: np.dtype = np.dtype("uint8")
     _frontiers_px: np.ndarray = np.array([])
     frontiers: np.ndarray = np.array([])
@@ -42,8 +44,11 @@ class SemanticMap(BaseMap):
         self.multi_channel = multi_channel
         self.explored_area = np.zeros((size, size), dtype=bool)
         self._map = np.zeros((size, size), dtype=np.dtype("uint8"))
+        self._conf_map = cp.zeros((size, size), dtype=np.float16)
         if self.multi_channel > 2:
             self._map = np.zeros((*self._map.shape, self.multi_channel), dtype=np.dtype("uint8"))
+            self._conf_map = cp.zeros((*self._conf_map.shape, self.multi_channel), dtype=np.float16)
+
         self._navigable_map = np.zeros((size, size), dtype=bool)
         self._min_height = min_height
         self._max_height = max_height
@@ -58,6 +63,7 @@ class SemanticMap(BaseMap):
     def reset(self) -> None:
         super().reset()
         self._map.fill(0)
+        self._conf_map.fill(0)
         self._navigable_map.fill(0)
         self.explored_area.fill(0)
         self._frontiers_px = np.array([])
@@ -75,6 +81,7 @@ class SemanticMap(BaseMap):
         topdown_fov: float,
         explore: bool = True,
         update_semantics: bool = True,
+        weighted: str = None,
     ) -> None:
         """
         Adds all obstacles from the current view to the map. Also updates the area
@@ -107,7 +114,9 @@ class SemanticMap(BaseMap):
 
                 scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
                 mask = scaled_depth < max_depth
-                semantic_pcd_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy, semantic_mask=semantic)
+                semantic_pcd_camera_frame = get_point_cloud(
+                    scaled_depth, mask, fx, fy, fov=topdown_fov, semantic_mask=semantic
+                )
                 semantic_pcd_episodic_frame = transform_points(tf_camera_to_episodic, semantic_pcd_camera_frame)
 
                 # 移除指定高度的点 可能存在类别信息丢失
@@ -120,9 +129,33 @@ class SemanticMap(BaseMap):
                 xy_points = semantic_cloud[:, :2]
                 pixel_points = self._xy_to_px(xy_points)
                 cls_ind = semantic_cloud[:, 3].astype(np.uint8)
-
+                conf = semantic_cloud[:, 4].astype(np.float16)
                 # fix offset for cls id
-                self._map[pixel_points[:, 1], pixel_points[:, 0], cls_ind - 1] = 1
+                if weighted == "conf_weighted":
+                    new_values = conf
+                    new_map = cp.zeros_like(self._conf_map)
+                    new_map[pixel_points[:, 1], pixel_points[:, 0], cls_ind - 1] = new_values
+                    mask = new_map != 0
+                    cp.add(self._conf_map, new_map, out=self._conf_map)
+                    # cp.divide(self._conf_map, 2, out=self._conf_map, where=mask)  # cupy does not support where
+                    self._conf_map[mask] = cp.divide(self._conf_map[mask], 2)
+                    self._conf_map = cp.nan_to_num(self._conf_map)
+                    self._map = cp.asnumpy(self._conf_map > 0.5).astype(np.uint8)
+
+                elif weighted == "conf_equal":
+                    new_values = 1
+                    self._conf_map[self._conf_map > 0] = 1
+                    new_map = cp.zeros_like(self._conf_map)
+                    new_map[pixel_points[:, 1], pixel_points[:, 0], cls_ind - 1] = new_values
+                    mask = new_map != 0
+                    cp.add(self._conf_map, new_map, out=self._conf_map, where=mask)
+                    self._conf_map[mask] = cp.divide(self._conf_map[mask], 2)
+                    self._conf_map = cp.nan_to_num(self._conf_map)
+                    self._map = cp.asnumpy(self._conf_map > 0.5).astype(np.uint8)
+
+                else:
+                    # "override"
+                    self._map[pixel_points[:, 1], pixel_points[:, 0], cls_ind - 1] = conf > 0.5
 
                 occupied_area = np.any(self._map[:, :, :] != 0, axis=2).astype(np.uint8)
 
@@ -143,7 +176,9 @@ class SemanticMap(BaseMap):
                     filled_depth = fill_small_holes(depth, self._hole_area_thresh)
                 scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
                 mask = scaled_depth < max_depth
-                semantic_pcd_camera_frame = get_point_cloud(scaled_depth, mask, fx, fy, semantic_mask=semantic)
+                semantic_pcd_camera_frame = get_point_cloud(
+                    scaled_depth, mask, fx, fy, fov=topdown_fov, semantic_mask=semantic
+                )
                 semantic_pcd_episodic_frame = transform_points(tf_camera_to_episodic, semantic_pcd_camera_frame)
                 # 移除指定高度的点 可能存在类别信息丢失
                 obstacle_cloud = filter_points_by_height(
@@ -226,15 +261,14 @@ class SemanticMap(BaseMap):
         return frontiers
 
     def has_object(self, target_ind: int, pixel_thresh: int = 5) -> bool:
-        """
-        判断目标对象是否存在于地图中。
+        """Determines whether the target object is present in the map.
 
-        参数:
-        target_ind (int): 目标对象在地图中的索引。
-        pixel_thresh (int): 判断目标对象存在的像素阈值，默认为5。数值过低可能导致误判。
+        Args:
+            target_ind (int): The index of the target object in the map.
+            pixel_thresh (int): The pixel threshold to determine the presence of the target object, default is 5. A value too low may cause false positives.
 
-        返回:
-        bool: 如果目标对象的像素总和大于阈值，则返回True，否则返回False。
+        Returns:
+            bool: Returns True if the sum of the target object's pixels is greater than the threshold, otherwise returns False.
         """
         return np.sum(self._map[:, :, target_ind]) > pixel_thresh
 

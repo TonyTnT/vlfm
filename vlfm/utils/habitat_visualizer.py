@@ -113,7 +113,7 @@ class HabitatVis:
         if len(frames) > 0:
             frames = pad_images(frames, pad_from_top=True)
 
-        frames = [resize_image(f, 480 * 2) for f in frames]
+        # frames = [resize_image(f, 480 * 2) for f in frames]
 
         self.reset()
 

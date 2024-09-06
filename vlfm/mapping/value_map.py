@@ -174,7 +174,12 @@ class ValueMap(BaseMap):
         return
 
     def sort_waypoints(
-        self, waypoints: np.ndarray, radius: float, reduce_fn: Optional[Callable] = None, reduction: str = "median"
+        self,
+        waypoints: np.ndarray,
+        radius: float,
+        reduce_fn: Optional[Callable] = None,
+        reduction: str = "median",
+        sorted=True,
     ) -> Tuple[np.ndarray, List[float]]:
         """Selects the best waypoint from the given list of waypoints.
 
@@ -217,13 +222,15 @@ class ValueMap(BaseMap):
         if self._value_channels > 1:
             assert reduce_fn is not None, "Must provide a reduction function when using multiple value channels."
             values = reduce_fn(np.array(values))
+        if sorted:
+            # Use np.argsort to get the indices of the sorted values
+            sorted_inds = np.argsort([-v for v in values])  # type: ignore
+            sorted_values = [values[i] for i in sorted_inds]
+            sorted_frontiers = np.array([waypoints[i] for i in sorted_inds])
 
-        # Use np.argsort to get the indices of the sorted values
-        sorted_inds = np.argsort([-v for v in values])  # type: ignore
-        sorted_values = [values[i] for i in sorted_inds]
-        sorted_frontiers = np.array([waypoints[i] for i in sorted_inds])
-
-        return sorted_frontiers, sorted_values
+            return sorted_frontiers, sorted_values
+        else:
+            return np.array(waypoints), values
 
     def visualize(
         self,

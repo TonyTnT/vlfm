@@ -212,14 +212,14 @@ def transform_points(transformation_matrix: np.ndarray, points: np.ndarray) -> n
     Returns:
         np.ndarray: An array of transformed points.
     """
-    if points.shape[1] == 4:
+    if points.shape[1] >= 4:
         # Separate the points and the category information
         points_coords = points[:, :3]
-        categories = points[:, 3]
+        extra_info = points[:, 3:]
     else:
         # No category information
         points_coords = points
-        categories = None
+        extra_info = None
 
     # Add a homogeneous coordinate of 1 to each point for matrix multiplication
     homogeneous_points = np.hstack((points_coords, np.ones((points_coords.shape[0], 1))))
@@ -230,15 +230,43 @@ def transform_points(transformation_matrix: np.ndarray, points: np.ndarray) -> n
     # Remove the added homogeneous coordinate and divide by the last coordinate
     transformed_points = transformed_points[:, :3] / transformed_points[:, 3:]
 
-    if categories is not None:
+    if extra_info is not None:
         # Add the category information back to the transformed points
-        transformed_points = np.hstack((transformed_points, categories.reshape(-1, 1)))
+        transformed_points = np.hstack((transformed_points, extra_info))
 
     return transformed_points
 
 
+def remap(value: float, from_low: float, from_high: float, to_low: float, to_high: float) -> float:
+    """Maps a value from one range to another.
+
+    Args:
+        value (float): The value to be mapped.
+        from_low (float): The lower bound of the input range.
+        from_high (float): The upper bound of the input range.
+        to_low (float): The lower bound of the output range.
+        to_high (float): The upper bound of the output range.
+
+    Returns:
+        float: The mapped value.
+    """
+    return (value - from_low) * (to_high - to_low) / (from_high - from_low) + to_low
+
+
+def get_confidence(z, x, fov):
+    """Generate a FOV cone with central values weighted more heavily"""
+    _min_confidence = 0.25
+    horizontal = abs(z)
+    vertical = abs(x)
+    angle = np.arctan2(vertical, horizontal)
+    angle = remap(angle, 0, fov / 2, 0, np.pi / 2)
+    confidence = np.cos(angle) ** 2
+    confidence = remap(confidence, 0, 1, _min_confidence, 1)
+    return confidence
+
+
 def get_point_cloud(
-    depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: float, semantic_mask: np.array = None
+    depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: float, fov: float = None, semantic_mask: np.array = None
 ) -> np.ndarray:
     """Calculates the 3D coordinates (x, y, z) of points in the depth image based on
     the horizontal field of view (HFOV), the image width and height, the depth values,
@@ -259,7 +287,10 @@ def get_point_cloud(
     y = (v - depth_image.shape[0] // 2) * z / fy
     if semantic_mask is not None:
         semantic_labels = semantic_mask[v, u]
-        cloud = np.stack((z, -x, -y, semantic_labels), axis=-1)
+        x_pixel = x / 20
+        # y_pixel = y / 20
+        z_pixel = z / 20
+        cloud = np.stack((z, -x, -y, semantic_labels, get_confidence(z, x, fov)), axis=-1)
     else:
         cloud = np.stack((z, -x, -y), axis=-1)
 
