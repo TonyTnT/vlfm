@@ -1,0 +1,363 @@
+Config(
+    {
+        "SEED": 100,
+        "ENVIRONMENT": Config(
+            {
+                "MAX_EPISODE_STEPS": 10000000,
+                "MAX_EPISODE_SECONDS": 10000000,
+                "ITERATOR_OPTIONS": Config(
+                    {
+                        "CYCLE": True,
+                        "SHUFFLE": False,
+                        "GROUP_BY_SCENE": True,
+                        "NUM_EPISODE_SAMPLE": -1,
+                        "MAX_SCENE_REPEAT_EPISODES": -1,
+                        "MAX_SCENE_REPEAT_STEPS": 10000,
+                        "STEP_REPETITION_RANGE": 0.2,
+                    }
+                ),
+            }
+        ),
+        "TASK": Config(
+            {
+                "TYPE": "ObjectNav-v1",
+                "SENSORS": ["GPS_SENSOR", "COMPASS_SENSOR", "HEADING_SENSOR"],
+                "MEASUREMENTS": ["DISTANCE_TO_GOAL", "SUCCESS", "SPL"],
+                "GOAL_SENSOR_UUID": "pointgoal",
+                "POSSIBLE_ACTIONS": ["STOP", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT", "LOOK_UP", "LOOK_DOWN"],
+                "ACTIONS": Config(
+                    {
+                        "STOP": Config({"TYPE": "StopAction"}),
+                        "MOVE_FORWARD": Config({"TYPE": "MoveForwardAction"}),
+                        "TURN_LEFT": Config({"TYPE": "TurnLeftAction"}),
+                        "TURN_RIGHT": Config({"TYPE": "TurnRightAction"}),
+                        "LOOK_UP": Config({"TYPE": "LookUpAction"}),
+                        "LOOK_DOWN": Config({"TYPE": "LookDownAction"}),
+                        "TELEPORT": Config({"TYPE": "TeleportAction"}),
+                        "VELOCITY_CONTROL": Config(
+                            {
+                                "TYPE": "VelocityAction",
+                                "LIN_VEL_RANGE": [0.0, 0.25],
+                                "ANG_VEL_RANGE": [-10.0, 10.0],
+                                "MIN_ABS_LIN_SPEED": 0.025,
+                                "MIN_ABS_ANG_SPEED": 1.0,
+                                "TIME_STEP": 1.0,
+                            }
+                        ),
+                        "ANSWER": Config({"TYPE": "AnswerAction"}),
+                    }
+                ),
+                "POINTGOAL_SENSOR": Config({"TYPE": "PointGoalSensor", "GOAL_FORMAT": "POLAR", "DIMENSIONALITY": 2}),
+                "POINTGOAL_WITH_GPS_COMPASS_SENSOR": Config(
+                    {"TYPE": "PointGoalWithGPSCompassSensor", "GOAL_FORMAT": "POLAR", "DIMENSIONALITY": 2}
+                ),
+                "OBJECTGOAL_SENSOR": Config(
+                    {"TYPE": "ObjectGoalSensor", "GOAL_SPEC": "TASK_CATEGORY_ID", "GOAL_SPEC_MAX_VAL": 50}
+                ),
+                "IMAGEGOAL_SENSOR": Config({"TYPE": "ImageGoalSensor"}),
+                "HEADING_SENSOR": Config({"TYPE": "HeadingSensor"}),
+                "COMPASS_SENSOR": Config({"TYPE": "CompassSensor"}),
+                "GPS_SENSOR": Config({"TYPE": "GPSSensor", "DIMENSIONALITY": 2}),
+                "PROXIMITY_SENSOR": Config({"TYPE": "ProximitySensor", "MAX_DETECTION_RADIUS": 2.0}),
+                "SUCCESS": Config({"TYPE": "Success", "SUCCESS_DISTANCE": 0.2}),
+                "SPL": Config({"TYPE": "SPL"}),
+                "SOFT_SPL": Config({"TYPE": "SoftSPL"}),
+                "TOP_DOWN_MAP": Config(
+                    {
+                        "TYPE": "TopDownMap",
+                        "MAX_EPISODE_STEPS": 1000,
+                        "MAP_PADDING": 3,
+                        "MAP_RESOLUTION": 1024,
+                        "DRAW_SOURCE": True,
+                        "DRAW_BORDER": True,
+                        "DRAW_SHORTEST_PATH": True,
+                        "FOG_OF_WAR": Config({"DRAW": True, "VISIBILITY_DIST": 5.0, "FOV": 90}),
+                        "DRAW_VIEW_POINTS": True,
+                        "DRAW_GOAL_POSITIONS": True,
+                        "DRAW_GOAL_AABBS": True,
+                    }
+                ),
+                "COLLISIONS": Config({"TYPE": "Collisions"}),
+                "QUESTION_SENSOR": Config({"TYPE": "QuestionSensor"}),
+                "CORRECT_ANSWER": Config({"TYPE": "CorrectAnswer"}),
+                "EPISODE_INFO": Config({"TYPE": "EpisodeInfo"}),
+                "INSTRUCTION_SENSOR": Config({"TYPE": "InstructionSensor"}),
+                "INSTRUCTION_SENSOR_UUID": "instruction",
+                "DISTANCE_TO_GOAL": Config({"TYPE": "DistanceToGoal", "DISTANCE_TO": "POINT"}),
+                "ANSWER_ACCURACY": Config({"TYPE": "AnswerAccuracy"}),
+            }
+        ),
+        "SIMULATOR": Config(
+            {
+                "TYPE": "Sim-v0",
+                "ACTION_SPACE_CONFIG": "v1",
+                "FORWARD_STEP_SIZE": 0.25,
+                "SCENE": "data/scene_datasets/habitat-test-scenes/van-gogh-room.glb",
+                "SCENE_DATASET": "default",
+                "ADDITIONAL_OBJECT_PATHS": [],
+                "SEED": 100,
+                "TURN_ANGLE": 30,
+                "TILT_ANGLE": 30,
+                "DEFAULT_AGENT_ID": 0,
+                "RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 0.88, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 79.0,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "TYPE": "HabitatSimRGBSensor",
+                    }
+                ),
+                "DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 0.88, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 79.0,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "MIN_DEPTH": 0.5,
+                        "MAX_DEPTH": 5.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimDepthSensor",
+                    }
+                ),
+                "SEMANTIC_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 0.88, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 79,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "TYPE": "HabitatSimSemanticSensor",
+                    }
+                ),
+                "EQUIRECT_RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "TYPE": "HabitatSimEquirectangularRGBSensor",
+                    }
+                ),
+                "EQUIRECT_DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 10.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimEquirectangularDepthSensor",
+                    }
+                ),
+                "EQUIRECT_SEMANTIC_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "TYPE": "HabitatSimEquirectangularSemanticSensor",
+                    }
+                ),
+                "HEAD_RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "TYPE": "HabitatSimRGBSensor",
+                        "UUID": "robot_head_rgb",
+                    }
+                ),
+                "HEAD_DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 10.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimDepthSensor",
+                        "UUID": "robot_head_depth",
+                    }
+                ),
+                "ARM_RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "TYPE": "HabitatSimRGBSensor",
+                        "UUID": "robot_arm_rgb",
+                    }
+                ),
+                "ARM_DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 10.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimDepthSensor",
+                        "UUID": "robot_arm_depth",
+                    }
+                ),
+                "THIRD_RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "TYPE": "HabitatSimRGBSensor",
+                        "UUID": "robot_third_rgb",
+                    }
+                ),
+                "THIRD_DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "HFOV": 90,
+                        "SENSOR_SUBTYPE": "PINHOLE",
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 10.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimDepthSensor",
+                        "UUID": "robot_third_rgb",
+                    }
+                ),
+                "FISHEYE_RGB_SENSOR": Config(
+                    {
+                        "HEIGHT": 640,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "XI": -0.27,
+                        "ALPHA": 0.57,
+                        "FOCAL_LENGTH": [364.84, 364.86],
+                        "PRINCIPAL_POINT_OFFSET": None,
+                        "SENSOR_MODEL_TYPE": "DOUBLE_SPHERE",
+                        "TYPE": "HabitatSimFisheyeRGBSensor",
+                    }
+                ),
+                "FISHEYE_DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "XI": -0.27,
+                        "ALPHA": 0.57,
+                        "FOCAL_LENGTH": [364.84, 364.86],
+                        "PRINCIPAL_POINT_OFFSET": None,
+                        "SENSOR_MODEL_TYPE": "DOUBLE_SPHERE",
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 10.0,
+                        "NORMALIZE_DEPTH": True,
+                        "TYPE": "HabitatSimFisheyeDepthSensor",
+                    }
+                ),
+                "FISHEYE_SEMANTIC_SENSOR": Config(
+                    {
+                        "HEIGHT": 640,
+                        "WIDTH": 640,
+                        "POSITION": [0, 1.25, 0],
+                        "ORIENTATION": [0.0, 0.0, 0.0],
+                        "XI": -0.27,
+                        "ALPHA": 0.57,
+                        "FOCAL_LENGTH": [364.84, 364.86],
+                        "PRINCIPAL_POINT_OFFSET": None,
+                        "SENSOR_MODEL_TYPE": "DOUBLE_SPHERE",
+                        "TYPE": "HabitatSimFisheyeSemanticSensor",
+                    }
+                ),
+                "AGENT_0": Config(
+                    {
+                        "HEIGHT": 0.88,
+                        "RADIUS": 0.18,
+                        "SENSORS": ["RGB_SENSOR", "DEPTH_SENSOR"],
+                        "IS_SET_START_STATE": False,
+                        "START_POSITION": [0, 0, 0],
+                        "START_ROTATION": [0, 0, 0, 1],
+                    }
+                ),
+                "AGENTS": ["AGENT_0"],
+                "HABITAT_SIM_V0": Config(
+                    {
+                        "GPU_DEVICE_ID": 0,
+                        "GPU_GPU": False,
+                        "ALLOW_SLIDING": True,
+                        "ENABLE_PHYSICS": False,
+                        "PHYSICS_CONFIG_FILE": "./data/default.physics_config.json",
+                        "LEAVE_CONTEXT_WITH_BACKGROUND_RENDERER": False,
+                    }
+                ),
+            }
+        ),
+        "PYROBOT": Config(
+            {
+                "ROBOTS": ["locobot"],
+                "ROBOT": "locobot",
+                "SENSORS": ["RGB_SENSOR", "DEPTH_SENSOR", "BUMP_SENSOR"],
+                "BASE_CONTROLLER": "proportional",
+                "BASE_PLANNER": "none",
+                "RGB_SENSOR": Config({"HEIGHT": 480, "WIDTH": 640, "TYPE": "PyRobotRGBSensor", "CENTER_CROP": False}),
+                "DEPTH_SENSOR": Config(
+                    {
+                        "HEIGHT": 480,
+                        "WIDTH": 640,
+                        "TYPE": "PyRobotDepthSensor",
+                        "MIN_DEPTH": 0.0,
+                        "MAX_DEPTH": 5.0,
+                        "NORMALIZE_DEPTH": True,
+                        "CENTER_CROP": False,
+                    }
+                ),
+                "BUMP_SENSOR": Config({"TYPE": "PyRobotBumpSensor"}),
+                "LOCOBOT": Config(
+                    {
+                        "ACTIONS": ["BASE_ACTIONS", "CAMERA_ACTIONS"],
+                        "BASE_ACTIONS": ["go_to_relative", "go_to_absolute"],
+                        "CAMERA_ACTIONS": ["set_pan", "set_tilt", "set_pan_tilt"],
+                    }
+                ),
+            }
+        ),
+        "DATASET": Config(
+            {
+                "TYPE": "PointNav-v1",
+                "SPLIT": "val",
+                "SCENES_DIR": "data/scene_datasets/",
+                "CONTENT_SCENES": [
+                    "Collierville.glb",
+                    "Corozal.glb",
+                    "Darden.glb",
+                    "Markleeville.glb",
+                    "Wiconisco.glb",
+                ],
+                "DATA_PATH": "data/datasets/objectnav/gibson/v1.1.1/{split}/{split}.json.gz",
+                "EPISODES_DIR": "data/datasets/objectnav/gibson/v1.1/{split}/",
+            }
+        ),
+    }
+)

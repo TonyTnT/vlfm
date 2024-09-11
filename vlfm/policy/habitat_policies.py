@@ -38,6 +38,9 @@ from .itm_policy import (
     ITMPolicyV11,
     ITMPolicyV12,
     ITMPolicyV13,
+    ITMPolicyV14,
+    ITMPolicyV15,
+    ITMPolicyV16,
     ITMPolicyV2_YOLOWORLD,
     ITMPolicyV2_YOLOv10,
     ITMPolicyV9_YOLOv10,
@@ -361,6 +364,21 @@ class HabitatITMPolicyV12(HabitatMixin, ITMPolicyV12):
 
 @baseline_registry.register_policy
 class HabitatITMPolicyV13(HabitatMixin, ITMPolicyV13):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV14(HabitatMixin, ITMPolicyV14):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV15(HabitatMixin, ITMPolicyV15):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV16(HabitatMixin, ITMPolicyV16):
     pass
 
 

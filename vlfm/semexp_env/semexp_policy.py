@@ -9,7 +9,17 @@ from torch import Tensor
 
 from vlfm.mapping.obstacle_map import ObstacleMap
 from vlfm.policy.base_objectnav_policy import BaseObjectNavPolicy
-from vlfm.policy.itm_policy import ITMPolicy, ITMPolicyV2, ITMPolicyV3
+from vlfm.policy.itm_policy import (
+    ITMPolicy,
+    ITMPolicyV2,
+    ITMPolicyV3,
+    ITMPolicyV11,
+    ITMPolicyV12,
+    ITMPolicyV13,
+    ITMPolicyV14,
+    ITMPolicyV15,
+    ITMPolicyV16,
+)
 from vlfm.utils.geometry_utils import xyz_yaw_to_tf_matrix
 from vlfm.vlm.grounding_dino import ObjectDetections
 
@@ -45,8 +55,6 @@ class SemExpMixin:
     ) -> None:
         super().__init__(*args, **kwargs)  # type: ignore
         print(args)
-        # Print the parent class name
-        print(f"Parent 【{len(self.__class__.__bases__)}】class name: {self.__class__.__bases__[0].__name__} {self.__class__.__bases__[1].__name__}")
         assert self._compute_frontiers, "Must set self._compute_frontiers = True"
         self._camera_height = camera_height
         self._min_depth = min_depth
@@ -55,7 +63,7 @@ class SemExpMixin:
         self._camera_fov = camera_fov_rad
         self._fx = self._fy = image_width / (2 * np.tan(camera_fov_rad / 2))
 
-        self._compute_frontiers: bool = super()._compute_frontiers  # type: ignore
+        self._compute_frontiers: bool = self._compute_frontiers  # type: ignore
 
     def act(
         self: Union["SemExpMixin", BaseObjectNavPolicy],
@@ -68,9 +76,7 @@ class SemExpMixin:
         """Converts object ID to string name, returns action as PolicyActionData"""
         parent_cls: BaseObjectNavPolicy = super()  # type: ignore
         try:
-            action, rnn_hidden_states = parent_cls.act(
-                observations, None, None, masks, deterministic
-            )
+            action, rnn_hidden_states = parent_cls.act(observations, None, None, masks, deterministic)
         except StopIteration:
             action = self._stop_action
         return action, self._policy_info
@@ -98,9 +104,7 @@ class SemExpMixin:
         info["start_yaw"] = self._start_yaw
         return info
 
-    def _cache_observations(
-        self: Union["SemExpMixin", BaseObjectNavPolicy], observations: Dict[str, Any]
-    ) -> None:
+    def _cache_observations(self: Union["SemExpMixin", BaseObjectNavPolicy], observations: Dict[str, Any]) -> None:
         """Caches the rgb, depth, and camera transform from the observations.
 
         Args:
@@ -169,4 +173,28 @@ class SemExpITMPolicyV2(SemExpMixin, ITMPolicyV2):
 
 
 class SemExpITMPolicyV3(SemExpMixin, ITMPolicyV3):
+    pass
+
+
+class SemExpITMPolicyV11(SemExpMixin, ITMPolicyV11):
+    pass
+
+
+class SemExpITMPolicyV12(SemExpMixin, ITMPolicyV12):
+    pass
+
+
+class SemExpITMPolicyV13(SemExpMixin, ITMPolicyV13):
+    pass
+
+
+class SemExpITMPolicyV14(SemExpMixin, ITMPolicyV14):
+    pass
+
+
+class SemExpITMPolicyV15(SemExpMixin, ITMPolicyV15):
+    pass
+
+
+class SemExpITMPolicyV16(SemExpMixin, ITMPolicyV16):
     pass

@@ -17,7 +17,8 @@ try:
 
     habitat_version = habitat.__version__
 
-    if habitat_version == "0.1.5":
+    # if habitat_version == "0.1.5":
+    if habitat_version == "0.2.1":
         print("Using habitat 0.1.5; assuming SemExp code is being used")
 
         class PointNavResNetTensorOutputPolicy(PointNavResNetPolicy):
@@ -149,7 +150,8 @@ def load_pointnav_policy(file_path: str) -> PointNavResNetTensorOutputPolicy:
             }
         )
         action_space = Discrete(4)
-        if habitat_version == "0.1.5":
+        # if habitat_version == "0.1.5":
+        if habitat_version == "0.2.1":
             pointnav_policy = PointNavResNetTensorOutputPolicy(
                 obs_space,
                 action_space,
@@ -167,9 +169,14 @@ def load_pointnav_policy(file_path: str) -> PointNavResNetTensorOutputPolicy:
                 PointNavResNetNet,
             )
 
-            # print(pointnav_policy)
+            print(pointnav_policy)
             pointnav_policy.net = PointNavResNetNet(discrete_actions=True, no_fwd_dict=True)
             state_dict = torch.load(file_path + ".state_dict", map_location="cpu")
+            # fix the key mismatch
+            if "net.prev_action_embedding.weight" in state_dict:
+                state_dict["net.prev_action_embedding_discrete.weight"] = state_dict.pop(
+                    "net.prev_action_embedding.weight"
+                )
         else:
             ckpt_dict = torch.load(file_path, map_location="cpu")
             pointnav_policy = PointNavResNetTensorOutputPolicy.from_config(ckpt_dict["config"], obs_space, action_space)

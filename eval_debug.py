@@ -17,16 +17,7 @@ except Exception as e:
 
 from moviepy.editor import ImageSequenceClip
 
-from vlfm.semexp_env.semexp_policy import (
-    SemExpITMPolicyV2,
-    SemExpITMPolicyV3,
-    SemExpITMPolicyV11,
-    SemExpITMPolicyV12,
-    SemExpITMPolicyV13,
-    SemExpITMPolicyV14,
-    SemExpITMPolicyV15,
-    SemExpITMPolicyV16,
-)
+from vlfm.semexp_env.semexp_policy import SemExpITMPolicyV2, SemExpITMPolicyV3
 from vlfm.utils.img_utils import reorient_rescale_map, resize_images
 from vlfm.utils.log_saver import is_evaluated, log_episode
 from vlfm.utils.visualization import add_text_to_image
@@ -40,7 +31,7 @@ args.num_processes_on_first_gpu = 1
 args.agent = "vlfm"  # Doesn't really matter as long as it's not "sem_exp"
 args.split = "val"
 args.task_config = "/home/chenx2/vlfm/vlfm/semexp_env/objnav_gibson_vlfm.yaml"
-args.scene_name = os.environ.get("SCENE_NAME", "EMPTY")
+args.scene_name = "Corozal"
 # Ensure a random seed
 # args.seed = int(time.time() * 1000) % 2**32
 args.seed = 42
@@ -81,17 +72,24 @@ def main() -> None:
         visualize=True,
     )
 
-    policy_name = os.environ.get("POLICY_NAME", None)
-    policy_cls = globals()[policy_name]
+    exp_thresh = float(os.environ.get("EXPLORATION_THRESH", 0.0))
+    if exp_thresh > 0.0:
+        policy_cls = SemExpITMPolicyV3
+        policy_kwargs["exploration_thresh"] = exp_thresh
+        policy_kwargs["text_prompt"] = (
+            "Seems like there is a target_object ahead.|There is a lot of area to explore ahead."
+        )
+    else:
+        policy_cls = SemExpITMPolicyV2
+
     policy = policy_cls(**policy_kwargs)  # type: ignore
 
     torch.set_num_threads(1)
     envs = make_vec_envs(args)
     print("Environment created", envs)
     ep_id, scene_id, target_object = "", "", ""
-    sc = []
+    sn = 0
     obs, infos = envs.reset()
-    spl = []
     for ep_num in tqdm(range(num_episodes)):
         vis_imgs = []
         for step in range(args.max_episode_length):
@@ -111,19 +109,18 @@ def main() -> None:
                 obs_dict = merge_obs_infos(obs, infos)
                 action, policy_infos = policy.act(obs_dict, None, None, masks)
 
-                if "VIDEO_DIR" in os.environ:
-                    frame = create_frame(policy_infos)
-                    frame = add_text_to_image(frame, "Step: " + str(step), top=True)
-                    vis_imgs.append(frame)
+                # if "VIDEO_DIR" in os.environ:
+                frame = create_frame(policy_infos)
+                frame = add_text_to_image(frame, "Step: " + str(step), top=True)
+                vis_imgs.append(frame)
 
                 action = action.squeeze(0)
 
                 obs, rew, done, infos = envs.step(action)
 
             if done:
-                sc.append(infos[0]["success"])
-                spl.append(infos[0]["spl"])
-                print("Success:", infos[0]["success"], "--- Rate : ", np.mean(sc))
+                sn += infos[0]["success"]
+                print("Success:", infos[0]["success"], "--- Rate : ", sn / (ep_num + 1))
                 print("SPL:", infos[0]["spl"])
                 data = {
                     "success": infos[0]["success"],
@@ -131,10 +128,10 @@ def main() -> None:
                     "distance_to_goal": infos[0]["distance_to_goal"],
                     "target_object": target_object,
                 }
-                folder = "../VLFMExp/"
+                folder = "gibson_vlfm"
                 if not os.path.exists(folder):
                     os.makedirs(folder)
-                csv_file = os.path.join(folder, f"{policy_name}_{scene_id}_metrics.csv")
+                csv_file = os.path.join(folder, f"{scene_id}_metrics.csv")
                 data["episode_id"] = ep_id
                 data["scene_id"] = scene_id
 
@@ -148,17 +145,15 @@ def main() -> None:
                         writer.writeheader()
                     # Write the metrics as a new row
                     writer.writerow(data)
-                if "VIDEO_DIR" in os.environ:
-                    try:
-                        generate_video(vis_imgs, ep_id, scene_id, data)
-                    except Exception:
-                        print("Error generating video")
+                # if "VIDEO_DIR" in os.environ:
+                try:
+                    generate_video(vis_imgs, ep_id, scene_id, data)
+                except Exception:
+                    print("Error generating video")
                 if "ZSOS_LOG_DIR" in os.environ and not is_evaluated(ep_id, scene_id):
                     log_episode(ep_id, scene_id, data)
                 break
-    print("-" * 20)
-    print("Success rate:", np.mean(sc), "SPL:", np.mean(spl))
-    print("-" * 20)
+
     print("Test successfully completed")
 
 

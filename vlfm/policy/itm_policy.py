@@ -1296,6 +1296,7 @@ class ITMPolicyV11(BaseITMPolicy):
         masks: Tensor,
         deterministic: bool = False,
     ) -> Any:
+        print(self.__class__.__name__)
         self._pre_step(observations, masks)
         self._update_semantic_map()
         self._update_value_map()
@@ -1449,7 +1450,6 @@ class ITMPolicyV14(ITMPolicyV11):
     def _sort_frontiers_by_value(
         self, observations: "TensorDict", frontiers: np.ndarray
     ) -> Tuple[np.ndarray, List[float]]:
-        WALL_CEILING_FLOOR = [0, 3, 5]
         # 1. get value for frontiers from semantic value map
         _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
         _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
@@ -1476,6 +1476,62 @@ class ITMPolicyV14(ITMPolicyV11):
         sorted_indices = np.argsort(sorted_values)[::-1]
         sorted_frontiers = frontiers[sorted_indices]
         sorted_values = sorted_values[sorted_indices]
+        return sorted_frontiers, sorted_values
+
+
+class ITMPolicyV15(ITMPolicyV11):
+    """
+    [Ablation Exp]
+    ITMPolicyV15, no geometric cues
+    """
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        # 1. get value for frontiers from semantic value map
+        _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
+        _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
+            frontiers, 0.75, self.reduce_fn, "max", sorted=False
+        )
+        values = np.mean([frontier_values_semantic, frointer_values_blip2], axis=0)
+        sorted_inds = np.argsort([-v for v in values])  # type: ignore
+        sorted_values = [values[i] for i in sorted_inds]
+        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        self.logger.debug(f"Frointer values: Semantic-{frontier_values_semantic}, Blip2-{frointer_values_blip2}")
+        return sorted_frontiers, sorted_values
+
+
+class ITMPolicyV16(ITMPolicyV11):
+    """
+    [Ablation Exp]
+    ITMPolicyV15, only semantic cues
+    """
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        # self._update_value_map()
+        self._update_semantic_value_map()
+        return super(ITMPolicyV11, self).act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        # 1. get value for frontiers from semantic value map
+        _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
+            frontiers, 0.75, self.reduce_fn, "max", sorted=False
+        )
+        sorted_inds = np.argsort([-v for v in frontier_values_semantic])  # type: ignore
+        sorted_values = [frontier_values_semantic[i] for i in sorted_inds]
+        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        self.logger.debug(f"Frointer values: Semantic-{frontier_values_semantic}")
         return sorted_frontiers, sorted_values
 
 
