@@ -1186,10 +1186,17 @@ class ITMPolicyV11(BaseITMPolicy):
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
         # 150 semantic classes, 6 target classes
-        self.similarity_mat = np.zeros((len(self.id2label), len(HM3D_ID_TO_NAME)))
+        self.labels = HM3D_ID_TO_NAME
+        self.similarity_mat = np.zeros((len(self.id2label), len(self.labels)))
         for i in range(len(self.id2label)):
-            for j in range(len(HM3D_ID_TO_NAME)):
-                self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], HM3D_ID_TO_NAME[j])
+            for j in range(len(self.labels)):
+                values = []
+                if "|" in self.labels[j]:
+                    for l in self.labels[j].split("|"):
+                        values.append(self.cosine_similarity(self.id2label[str(i)], l))
+                    self.similarity_mat[i][j] = np.mean(values)
+                else:
+                    self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], self.labels[j])
         self.logger.debug(
             f"Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
         )
@@ -1271,7 +1278,7 @@ class ITMPolicyV11(BaseITMPolicy):
             )
 
     def _update_semantic_value_map(self) -> None:
-        target_id = HM3D_ID_TO_NAME.index(self._target_object)
+        target_id = self.labels.index(self._target_object)
         self._semantic_value_map.generate_weight_from_semantic_map(
             self._semantic_map._map, self.similarity_mat, target_id
         )
@@ -1302,7 +1309,7 @@ class ITMPolicyV11(BaseITMPolicy):
         target_sim_thresh = np.mean(
             [
                 self.empty_scene_blip2_thresh,
-                self.similarity_mat[WALL_CEILING_FLOOR, HM3D_ID_TO_NAME.index(self._target_object)].mean(),
+                self.similarity_mat[WALL_CEILING_FLOOR, self.labels.index(self._target_object)].mean(),
             ]
         )
         # 1. get value for frontiers from semantic value map
@@ -1431,6 +1438,45 @@ class ITMPolicyV13(ITMPolicyV11):
             labels = [self.id2label[str(label_id)] for label_id in unique_labels]
             self.logger.debug(f"Current view, get items: {labels}")
             self._semantic_map.update_map(depth, mask, tf, min_depth, max_depth, self._fx, self._fy, fov, weighted=None)
+
+
+class ITMPolicyV14(ITMPolicyV11):
+    """
+    [Ablation Exp]
+    ITMPolicyV14, using same weights for four metircs. No thresh judge
+    """
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        WALL_CEILING_FLOOR = [0, 3, 5]
+        # 1. get value for frontiers from semantic value map
+        _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
+        _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
+            frontiers, 0.75, self.reduce_fn, "max", sorted=False
+        )
+        values = np.mean([frontier_values_semantic, frointer_values_blip2], axis=0)
+        # sorted_inds = np.argsort([-v for v in values])  # type: ignore
+        # sorted_values = [values[i] for i in sorted_inds]
+        # sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        self.logger.debug(f"Frointer values: Semantic-{frontier_values_semantic}, Blip2-{frointer_values_blip2}")
+        # 2. weighted with distance and density
+        self.logger.debug("Arounding frontiers are not with high correlated to the target, searching by the density")
+        robot_xy = self._observations_cache["robot_xy"]
+        # calculate normalize distances
+        distances = np.linalg.norm(np.array(frontiers) - robot_xy, axis=1)
+        normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+        normalized_distances = np.nan_to_num(normalized_distances)
+        normalized_densities = self.get_densities(np.array(frontiers), 2)
+        weights = np.array([0.5, 0.25, 0.25])
+        self.logger.debug(f"Normalized distances: {normalized_distances}, densities: {normalized_densities}")
+        combined_values = np.column_stack((values, normalized_distances, normalized_densities))
+        sorted_values = np.dot(combined_values, weights)
+
+        sorted_indices = np.argsort(sorted_values)[::-1]
+        sorted_frontiers = frontiers[sorted_indices]
+        sorted_values = sorted_values[sorted_indices]
+        return sorted_frontiers, sorted_values
 
 
 class ITMPolicyV10(ITMPolicyV9):
