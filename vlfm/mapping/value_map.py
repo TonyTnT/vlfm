@@ -232,6 +232,68 @@ class ValueMap(BaseMap):
         else:
             return np.array(waypoints), values
 
+    def waypoints_room_level_score(
+        self,
+        waypoints: np.ndarray,
+        target_id: int = 0,
+        radius: float = 0.5,
+        sorted=True,
+        sim_mat_room_target: np.array = None,
+        sim_mat_det_room: np.array = None,
+    ) -> Tuple[np.ndarray, List[float]]:
+        """Selects the best waypoint from the given list of waypoints.
+
+        Args:
+            waypoints (np.ndarray): An array of 2D waypoints to choose from.
+            radius (float): The radius in meters to use for selecting the best waypoint.
+            reduce_fn (Callable, optional): The function to use for reducing the values
+                within the given radius. Defaults to np.max.
+
+        Returns:
+            Tuple[np.ndarray, List[float]]: A tuple of the sorted waypoints and
+                their corresponding values.
+        """
+
+        radius_px = int(radius * self.pixels_per_meter)
+
+        def get_non_empty_channels(point: np.ndarray) -> List[int]:
+            x, y = point
+            px = int(-x * self.pixels_per_meter) + self._episode_pixel_origin[0]
+            py = int(-y * self.pixels_per_meter) + self._episode_pixel_origin[1]
+            point_px = (self._value_map.shape[0] - px, py)
+            non_empty_channels = [
+                c
+                for c in range(self._value_channels)
+                if pixel_value_within_radius(self._value_map[..., c], point_px, radius_px, reduction="mean") != -1
+            ]
+            if non_empty_channels == []:
+                non_empty_channels = [3]
+                print("some frontier has nothing around, compelete floor score")
+            return non_empty_channels
+
+        points_det_ids = [get_non_empty_channels(point) for point in waypoints]
+
+        # Calculate the score for each waypoint based on the non-empty channels
+        # [[],[],[],[]]
+        point_room_scores = []
+
+        for det_ids in points_det_ids:
+            det_names = [CONFIG_ADE20K_ID2LABEL["id2label"][str(det_id)] for det_id in det_ids]
+            print("point around has ", det_names)
+            point_room_scores.append(sim_mat_det_room[det_ids, :])
+        # print("point_room_scores: ", point_room_scores)
+
+        # [x,x,x,x,x]
+        target_room_scores = sim_mat_room_target[:, target_id]
+        point_target_scores = []
+        for point_scores in point_room_scores:
+            if len(point_scores) == 0:
+                point_target_scores.append(0)
+            else:
+                point_target_scores.append(np.mean(np.dot(point_scores, target_room_scores)))
+
+        return np.array(waypoints), point_target_scores
+
     def visualize(
         self,
         markers: Optional[List[Tuple[np.ndarray, Dict[str, Any]]]] = None,

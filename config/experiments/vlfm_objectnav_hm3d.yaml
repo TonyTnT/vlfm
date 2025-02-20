@@ -49,11 +49,13 @@ habitat_baselines:
 
   eval:
     split: "val"
+    video_option: 
+      - "disk"
 
   rl:
 
     policy:
-      name: "HabitatITMPolicyV6"
+      name: "HabitatITMPolicyV17"
 
     ppo:
       # ppo params

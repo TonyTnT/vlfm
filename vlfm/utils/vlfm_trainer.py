@@ -72,7 +72,7 @@ class VLFMTrainer(PPOTrainer):
         # a hierarchial policy
         if self.config.habitat_baselines.eval.should_load_ckpt:
             # map_location="cpu" is almost always better than mapping to a CUDA device.
-            ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu")
+            ckpt_dict = self.load_checkpoint(checkpoint_path, map_location="cpu", weights_only=False)
             step_id = ckpt_dict["extra_state"]["step"]
             print(step_id)
         else:

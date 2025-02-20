@@ -10,6 +10,7 @@ from torch import Tensor
 import torch
 import time
 import logging
+from transformers import AutoTokenizer, AutoModel
 
 from vlfm.mapping.frontier_map import FrontierMap
 from vlfm.mapping.semantic_map import SemanticMap
@@ -32,7 +33,7 @@ except Exception:
     pass
 
 PROMPT_SEPARATOR = "|"
-
+# gibson the same
 HM3D_ID_TO_NAME = ["chair", "bed", "potted plant", "toilet", "tv", "couch"]
 MP3D_ID_TO_NAME = [
     "chair",
@@ -96,7 +97,7 @@ class BaseITMPolicy(BaseObjectNavPolicy):
         console_handler = logging.StreamHandler()
         console_handler.setLevel(log_level)
         console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        # self.logger.addHandler(console_handler)
 
         self._itm = BLIP2ITMClient(port=int(os.environ.get("BLIP2ITM_PORT", "12182")))
         self._text_prompt = text_prompt
@@ -1182,7 +1183,9 @@ class ITMPolicyV11(BaseITMPolicy):
     def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
-        self._word2vec = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+        self._word2vec = SentenceTransformer(
+            "/home/chenx2/.cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2/snapshots/84f2bcc00d77236f9e89c8a360a00fb1139bf47d"
+        )
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
         # 150 semantic classes, 6 target classes
@@ -1322,7 +1325,9 @@ class ITMPolicyV11(BaseITMPolicy):
         sorted_inds = np.argsort([-v for v in values])  # type: ignore
         sorted_values = [values[i] for i in sorted_inds]
         sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
-        self.logger.debug(f"Frointer values: Semantic-{frontier_values_semantic}, Blip2-{frointer_values_blip2}")
+        self.logger.debug(
+            f"Frointer values: Semantic-{[round(v, 2) for v in frontier_values_semantic]}, Blip2-{[round(v, 2) for v in frointer_values_blip2]}"
+        )
         # 2. weighted with distance and density
         if np.all(np.array(sorted_values) < target_sim_thresh):
             self.logger.debug(
@@ -1396,17 +1401,433 @@ class ITMPolicyV11(BaseITMPolicy):
         super()._reset()
 
     def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
-        # policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
-        # policy_info["semantic_map"] = cv2.cvtColor(
-        #     self._semantic_map.visualize(),
-        #     cv2.COLOR_BGR2RGB,
-        # )
-        # policy_info["semantic_value_map"] = cv2.cvtColor(
-        #     self._semantic_value_map.visualize(),
-        #     cv2.COLOR_BGR2RGB,
-        # )
+        policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
+        policy_info["semantic_map"] = cv2.cvtColor(
+            self._semantic_map.visualize(),
+            cv2.COLOR_BGR2RGB,
+        )
+        policy_info["semantic_value_map"] = cv2.cvtColor(
+            self._semantic_value_map.visualize(),
+            cv2.COLOR_BGR2RGB,
+        )
 
-        return {}
+        return policy_info
+
+
+class ITMPolicyV17(ITMPolicyV11):
+    """
+    ITMPolicyV11 with prompt to adjust similarity
+    """
+
+    def cosine_similarity(self, label, target):
+        label_embedding = self._word2vec.encode(
+            f"A {label} is typically used in a context where people", show_progress_bar=False
+        )
+        target_embedding = self._word2vec.encode(
+            f"A {target} is typically used in a context where people", show_progress_bar=False
+        )
+        # 计算两个向量的点积
+        dot_product = np.dot(label_embedding, target_embedding)
+        # 计算两个向量的模长
+        norm_embedding1 = np.linalg.norm(label_embedding)
+        norm_embedding2 = np.linalg.norm(target_embedding)
+        # 计算余弦相似度
+        similarity = dot_product / (norm_embedding1 * norm_embedding2)
+        return similarity
+
+
+class ITMPolicyV18(BaseITMPolicy):
+    """
+    ITMPolicyV11 with prompt to adjust similarity change embedding model
+    """
+
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
+        model_name = "jinaai/jina-embeddings-v3"  # 或其他适合的模型
+        self._word2vec = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
+
+        # 150 semantic classes, 6 target classes
+        self.labels = HM3D_ID_TO_NAME
+        self.similarity_mat = np.zeros((len(self.id2label), len(self.labels)))
+        for i in range(len(self.id2label)):
+            for j in range(len(self.labels)):
+                values = []
+                if "|" in self.labels[j]:
+                    for l in self.labels[j].split("|"):
+                        values.append(self.cosine_similarity(self.id2label[str(i)], l))
+                    self.similarity_mat[i][j] = np.mean(values)
+                else:
+                    self.similarity_mat[i][j] = self.cosine_similarity(self.id2label[str(i)], self.labels[j])
+        self.logger.debug(
+            f"Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
+        )
+        self.empty_scene_blip2_thresh = float(
+            np.mean(
+                [
+                    self._itm.cosine(
+                        np.ones((480, 640, 3)) * 255,
+                        p.replace("target_object", self._target_object.replace("|", "/")),
+                    )
+                    for p in self._text_prompt.split(PROMPT_SEPARATOR)
+                ]
+            )
+        )
+
+        self._semantic_map = SemanticMap(
+            min_height=0.15,
+            max_height=0.88,
+            agent_radius=0.18,
+            semantic_id=self.id2label,
+            multi_channel=len(self.id2label),
+        )
+
+        self._semantic_value_map: ValueMap = ValueMap(
+            value_channels=len(self.id2label),
+            use_max_confidence=self.use_max_confidence,
+            obstacle_map=self._obstacle_map if self.sync_explored_areas else None,
+        )
+
+        def optimized_reduce_fn(arr, exclude_value=0):
+            """
+            计算每个元素沿最后一个轴的非零元素和指定数值外的平均值。
+
+            参数:
+            arr (np.ndarray): 输入数组。
+            exclude_value (float): 要排除的指定数值，默认为0。
+
+            返回:
+            result (np.ndarray): 沿最后一个轴的非零元素和指定数值外的平均值。
+            """
+            # 创建一个掩码，标记非零元素和指定数值外的元素
+            mask = arr != exclude_value
+            # 计算非零元素和指定数值外的数量
+            count_valid = np.sum(mask, axis=-1)
+            # 计算非零元素和指定数值外的总和
+            sum_valid = np.sum(arr * mask, axis=-1)
+            # 计算平均值，避免除以零
+            result = np.divide(sum_valid, count_valid, where=count_valid != 0)
+            # 将没有有效元素的位置设置为 0
+            result[count_valid == 0] = 0
+            return result
+
+        self.reduce_fn_vis = optimized_reduce_fn
+        # should pass exclude_value=-1 when called
+        self.reduce_fn = functools.partial(optimized_reduce_fn, exclude_value=-1)
+
+    def cosine_similarity(self, label, target):
+        embeddings = self._word2vec.encode(
+            [
+                f"A {label} is typically used in a context where people",
+                f"A {target} is typically used in a context where people",
+            ],
+            task="text-matching",
+        )
+        similarity = embeddings[0] @ embeddings[1].T
+        return similarity
+
+    def _update_semantic_map(self) -> None:
+        for rgb, depth, tf, min_depth, max_depth, fov in self._observations_cache["value_map_rgbd"]:
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            mask = self._ssa.segment(bgr)
+            unique_labels = np.unique(mask) - 1
+            labels = [self.id2label[str(label_id)] for label_id in unique_labels]
+            self.logger.debug(f"Current view, get items: {labels}")
+            self._semantic_map.update_map(
+                depth, mask, tf, min_depth, max_depth, self._fx, self._fy, fov, weighted="conf_weighted"
+            )
+
+    def _update_semantic_value_map(self) -> None:
+        target_id = self.labels.index(self._target_object)
+        self._semantic_value_map.generate_weight_from_semantic_map(
+            self._semantic_map._map, self.similarity_mat, target_id
+        )
+
+        self._semantic_value_map.update_agent_traj(
+            self._observations_cache["robot_xy"],
+            self._observations_cache["robot_heading"],
+        )
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        print(self.__class__.__name__)
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        self._update_value_map()
+        self._update_semantic_value_map()
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        WALL_CEILING_FLOOR = [0, 3, 5]
+        target_sim_thresh = np.mean(
+            [
+                self.empty_scene_blip2_thresh,
+                self.similarity_mat[WALL_CEILING_FLOOR, self.labels.index(self._target_object)].mean(),
+            ]
+        )
+        # 1. get value for frontiers from semantic value map
+        _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
+        _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
+            frontiers, 0.75, self.reduce_fn, "max", sorted=False
+        )
+        values = np.mean([frontier_values_semantic, frointer_values_blip2], axis=0)
+        sorted_inds = np.argsort([-v for v in values])  # type: ignore
+        sorted_values = [values[i] for i in sorted_inds]
+        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        self.logger.debug(
+            f"Frointer values: Semantic-{[round(v, 2) for v in frontier_values_semantic]}, Blip2-{[round(v, 2) for v in frointer_values_blip2]}"
+        )
+        # 2. weighted with distance and density
+        if np.all(np.array(sorted_values) < target_sim_thresh):
+            self.logger.debug(
+                "Arounding frontiers are not with high correlated to the target, searching by the density"
+            )
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_distances = np.nan_to_num(normalized_distances)
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.2, 0.4, 0.4])
+            self.logger.debug(f"Normalized distances: {normalized_distances}, densities: {normalized_densities}")
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
+        else:
+            self.logger.debug("Arounding frontiers have some similar objects, searching by the similarity")
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_distances = np.nan_to_num(normalized_distances)
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.8, 0.1, 0.1])
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
+
+    def get_densities(self, frontiers, radius):
+        """
+        计算每个 frontier 在指定半径内的密度。
+
+        参数:
+        frontiers (np.ndarray): 形状为 (N, 2) 的数组，表示 N 个 frontiers 的坐标。
+        radius (float): 指定的半径。
+
+        返回:
+        densities (np.ndarray): 形状为 (N,) 的数组，表示每个 frontier 的密度。
+        """
+        num_frontiers = frontiers.shape[0]
+        densities = np.zeros(num_frontiers, dtype=int)
+
+        # 计算距离矩阵
+        distance_matrix = np.linalg.norm(frontiers[:, np.newaxis, :] - frontiers[np.newaxis, :, :], axis=2)
+
+        # 计算密度
+        for i in range(num_frontiers):
+            densities[i] = np.sum(distance_matrix[i] <= radius) - 1  # 减去自身
+
+        # 归一化密度
+        max_density = np.max(densities)
+        if max_density > 0:
+            normalized_densities = (densities - np.min(densities)) / (max_density - np.min(densities))
+        else:
+            normalized_densities = densities
+        normalized_densities = np.nan_to_num(normalized_densities)
+        return normalized_densities
+
+    def _reset(self) -> None:
+        self._semantic_map.reset()
+        self._semantic_value_map.reset()
+        super()._reset()
+
+    def _get_policy_info(self, detections: ObjectDetections) -> Dict[str, Any]:
+        policy_info = super()._get_policy_info(detections, self.reduce_fn_vis)
+        policy_info["semantic_map"] = cv2.cvtColor(
+            self._semantic_map.visualize(),
+            cv2.COLOR_BGR2RGB,
+        )
+        policy_info["semantic_value_map"] = cv2.cvtColor(
+            self._semantic_value_map.visualize(),
+            cv2.COLOR_BGR2RGB,
+        )
+
+        return policy_info
+
+
+class ITMPolicyV19(ITMPolicyV11):
+    """
+    ITMPolicyV11 with prompt to adjust item-item similarity, add item-room similarity
+    只根据 frontier 的room score 来排序，room score 含义为 当前frontier 周围物品的room info 和 target的 room info接近程度
+    """
+
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(exploration_thresh, *args, **kwargs)
+
+        self.rooms = ["living room", "bedroom", "bathroom", "office", "kitchen"]
+        self.similarity_mat_det_room = np.zeros((len(self.id2label), len(self.rooms)))
+        self.similarity_mat_room_target = np.zeros((len(self.rooms), len(self.labels)))
+
+        self.calculate_similarity_room_target()
+        self.calculate_similarity_det_room()
+
+    def calculate_similarity_det_target(self):
+        for i in range(len(self.id2label)):
+            for j in range(len(self.labels)):
+                values = []
+                if "|" in self.labels[j]:
+                    for l in self.labels[j].split("|"):
+                        values.append(
+                            self.cosine_similarity(
+                                f"A {self.id2label[str(i)]} is typically used in a context where people",
+                                f"A {l} is typically used in a context where people",
+                            )
+                        )
+                    self.similarity_mat[i][j] = np.mean(values)
+                else:
+                    self.similarity_mat[i][j] = self.cosine_similarity(
+                        f"A {self.id2label[str(i)]} is typically used in a context where people",
+                        f"A { self.labels[j]} is typically used in a context where people",
+                    )
+        self.logger.debug(
+            f"[Item Level] Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
+        )
+
+    def calculate_similarity_room_target(self):
+        for i in range(len(self.rooms)):
+            for j in range(len(self.labels)):
+                values = []
+                if "|" in self.labels[j]:
+                    for l in self.labels[j].split("|"):
+                        values.append(
+                            self.cosine_similarity(
+                                f"A {self.rooms[i]} is a space where people",
+                                f"A {l} is typically used in a context where people",
+                            )
+                        )
+                    self.similarity_mat_room_target[i][j] = np.mean(values)
+                else:
+                    self.similarity_mat_room_target[i][j] = self.cosine_similarity(
+                        f"A {self.rooms[i]} is a space where people",
+                        f"A {self.labels[j]} is typically used in a context where people",
+                    )
+        self.logger.debug(
+            f"[Room Level] Similarity matrix generated, contians {self.similarity_mat_room_target.shape[0]} room classes and {self.similarity_mat_room_target.shape[1]} target classes"
+        )
+
+    def calculate_similarity_det_room(self):
+        for i in range(len(self.id2label)):
+            for j in range(len(self.rooms)):
+                values = []
+                self.similarity_mat_det_room[i][j] = self.cosine_similarity(
+                    f"A {self.id2label[str(i)]} is typically used in a context where people",
+                    f"A {self.rooms[j]} is a space where people",
+                )
+        self.logger.debug(
+            f"[Room Level] Similarity matrix generated, contians {self.similarity_mat_det_room.shape[0]} detection classes and {self.similarity_mat_det_room.shape[1]} room classes"
+        )
+
+    def cosine_similarity(self, label, target):
+        label_embedding = self._word2vec.encode(label, show_progress_bar=False)
+        target_embedding = self._word2vec.encode(target, show_progress_bar=False)
+        # 计算两个向量的点积
+        dot_product = np.dot(label_embedding, target_embedding)
+        # 计算两个向量的模长
+        norm_embedding1 = np.linalg.norm(label_embedding)
+        norm_embedding2 = np.linalg.norm(target_embedding)
+        # 计算余弦相似度
+        similarity = dot_product / (norm_embedding1 * norm_embedding2)
+        return similarity
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        WALL_CEILING_FLOOR = [0, 3, 5]
+        empty_scene_semantic_thresh = self.similarity_mat[
+            WALL_CEILING_FLOOR, self.labels.index(self._target_object)
+        ].mean()
+        # target_sim_thresh = np.mean(
+        #     [
+        #         self.empty_scene_blip2_thresh,
+        #         empty_scene_semantic_thresh,
+        #     ]
+        # )
+        target_sim_thresh = 0
+        target_id = self.labels.index(self._target_object)
+        # 1. get value for frontiers from semantic value map
+        # _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
+        # _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
+        #     frontiers, 1, self.reduce_fn, "max", sorted=False
+        # )
+        # frontier_values_semantic = [v if v != 0 else empty_scene_semantic_thresh for v in frontier_values_semantic]
+        # calculate room score for each frontier， cause each frontier has a lot of detections around, and detections correlate to a specific room, so we can use the detections to calculate the room score fro each frontier
+        _, frontier_values_room = self._semantic_value_map.waypoints_room_level_score(
+            frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
+        )
+
+        # values = np.mean([frontier_values_semantic, frointer_values_blip2, frontier_values_room], axis=0)
+        values = np.mean([frontier_values_room], axis=0)
+
+        sorted_inds = np.argsort([-v for v in values])  # type: ignore
+        sorted_values = [values[i] for i in sorted_inds]
+        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        # self.logger.debug(
+        #     f"Frointer values: Semantic-{[round(v, 2) for v in frontier_values_semantic]}, Blip2-{[round(v, 2) for v in frointer_values_blip2]}, Room-{[round(v, 2) for v in frontier_values_room]}"
+        # )
+        self.logger.debug(f"Frointer values:  Room-{[round(v, 2) for v in frontier_values_room]}")
+        # 2. weighted with distance and density
+        if np.all(np.array(sorted_values) < target_sim_thresh):
+            self.logger.debug(
+                "Arounding frontiers are not with high correlated to the target, searching by the density"
+            )
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_distances = np.nan_to_num(normalized_distances)
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.2, 0.3, 0.5])
+            self.logger.debug(f"Normalized distances: {normalized_distances}, densities: {normalized_densities}")
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
+        else:
+            self.logger.debug("Arounding frontiers have some similar objects, searching by the similarity")
+            robot_xy = self._observations_cache["robot_xy"]
+            # calculate normalize distances
+            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
+            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+            normalized_distances = np.nan_to_num(normalized_distances)
+            normalized_densities = self.get_densities(sorted_frontiers, 2)
+            weights = np.array([0.7, 0.1, 0.2])
+            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
+            sorted_values = np.dot(combined_values, weights)
+
+            sorted_indices = np.argsort(sorted_values)[::-1]
+            sorted_frontiers = sorted_frontiers[sorted_indices]
+            sorted_values = sorted_values[sorted_indices]
+            return sorted_frontiers, sorted_values
 
 
 class ITMPolicyV12(ITMPolicyV11):

@@ -15,7 +15,7 @@ try:
 except ModuleNotFoundError:
     print("Could not import groundingdino. This is OK if you are only using the client.")
 
-GROUNDING_DINO_CONFIG = "GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
+GROUNDING_DINO_CONFIG = "../GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py"
 GROUNDING_DINO_WEIGHTS = "data/groundingdino_swint_ogc.pth"
 CLASSES = "chair . person . dog ."  # Default classes. Can be overridden at inference.
 
