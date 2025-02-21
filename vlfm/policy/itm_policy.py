@@ -1184,7 +1184,10 @@ class ITMPolicyV11(BaseITMPolicy):
         super().__init__(*args, **kwargs)
         self._ssa = SSAClient(port=int(os.environ.get("SSA_PORT", "12185")))
         self._word2vec = SentenceTransformer(
-            "/home/chenx2/.cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2/snapshots/84f2bcc00d77236f9e89c8a360a00fb1139bf47d"
+            os.path.join(
+                os.path.expanduser("~"),
+                ".cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2/snapshots/84f2bcc00d77236f9e89c8a360a00fb1139bf47d",
+            )
         )
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]
 
@@ -1258,8 +1261,12 @@ class ITMPolicyV11(BaseITMPolicy):
 
     def cosine_similarity(self, label, target):
 
-        label_embedding = self._word2vec.encode(label, show_progress_bar=False)
-        target_embedding = self._word2vec.encode(target, show_progress_bar=False)
+        label_embedding = self._word2vec.encode(
+            f"A {label} is typically used in a context where people", show_progress_bar=False
+        )
+        target_embedding = self._word2vec.encode(
+            f"A {target} is typically used in a context where people", show_progress_bar=False
+        )
         # 计算两个向量的点积
         dot_product = np.dot(label_embedding, target_embedding)
         # 计算两个向量的模长
@@ -1299,11 +1306,12 @@ class ITMPolicyV11(BaseITMPolicy):
         masks: Tensor,
         deterministic: bool = False,
     ) -> Any:
-        print(self.__class__.__name__)
+        start_time = time.time()
         self._pre_step(observations, masks)
         self._update_semantic_map()
         self._update_value_map()
         self._update_semantic_value_map()
+        self.logger.info(f"{self.__class__.__name__} took {time.time() - start_time:.4f} seconds")
         return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
 
     def _sort_frontiers_by_value(
@@ -1557,7 +1565,6 @@ class ITMPolicyV18(BaseITMPolicy):
         masks: Tensor,
         deterministic: bool = False,
     ) -> Any:
-        print(self.__class__.__name__)
         self._pre_step(observations, masks)
         self._update_semantic_map()
         self._update_value_map()
@@ -1685,112 +1692,141 @@ class ITMPolicyV19(ITMPolicyV11):
         self.similarity_mat_det_room = np.zeros((len(self.id2label), len(self.rooms)))
         self.similarity_mat_room_target = np.zeros((len(self.rooms), len(self.labels)))
 
+        # 预计算所有需要的嵌入向量
+        self.precompute_embeddings()
+        # 计算相似度矩阵  room-target detections-room
         self.calculate_similarity_room_target()
         self.calculate_similarity_det_room()
 
-    def calculate_similarity_det_target(self):
+        # self.similarity_mat_det_target = np.dot(self.similarity_mat_det_room, self.similarity_mat_room_target)
+        # target_id = self.labels.index(self._target_object)
+        # # posibilities detection and target are in same room
+        # self.similarity_vec_det_target = self.similarity_mat_det_target[:, target_id]
+
+    def precompute_embeddings(self):
+        """预计算并缓存所有文本的嵌入向量"""
+        self.embeddings_cache = {}
+
+        # 缓存检测类的嵌入
         for i in range(len(self.id2label)):
+            text = f"A {self.id2label[str(i)]} is typically used in a context where people"
+            self.embeddings_cache[text] = self.get_embedding(text)
+
+        # 缓存房间类的嵌入
+        for room in self.rooms:
+            text = f"A {room} is a space where people"
+            self.embeddings_cache[text] = self.get_embedding(text)
+
+        # 缓存目标类的嵌入
+        for label in self.labels:
+            if "|" in label:
+                for sub_label in label.split("|"):
+                    text = f"A {sub_label} is typically used in a context where people"
+                    self.embeddings_cache[text] = self.get_embedding(text)
+            else:
+                text = f"A {label} is typically used in a context where people"
+                self.embeddings_cache[text] = self.get_embedding(text)
+
+        self.logger.debug(f"预计算了 {len(self.embeddings_cache)} 个嵌入向量")
+
+    def get_embedding(self, text):
+        """获取文本嵌入向量的辅助方法"""
+        return self._word2vec.encode(text, show_progress_bar=False)
+
+    def fast_cosine_similarity(self, text1, text2):
+        """使用缓存的嵌入向量计算余弦相似度"""
+        if text1 in self.embeddings_cache and text2 in self.embeddings_cache:
+            vec1 = self.embeddings_cache[text1]
+            vec2 = self.embeddings_cache[text2]
+            # 计算余弦相似度
+            return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
+        else:
+            # 回退到原始方法
+            return self.cosine_similarity(text1, text2)
+
+    def calculate_similarity_det_target(self):
+        """优化后的检测类与目标类相似度计算"""
+        for i in range(len(self.id2label)):
+            det_text = f"A {self.id2label[str(i)]} is typically used in a context where people"
+
             for j in range(len(self.labels)):
-                values = []
                 if "|" in self.labels[j]:
-                    for l in self.labels[j].split("|"):
-                        values.append(
-                            self.cosine_similarity(
-                                f"A {self.id2label[str(i)]} is typically used in a context where people",
-                                f"A {l} is typically used in a context where people",
-                            )
-                        )
-                    self.similarity_mat[i][j] = np.mean(values)
+                    # 对于包含多个子标签的情况，一次性获取所有相似度
+                    sub_labels = self.labels[j].split("|")
+                    target_texts = [
+                        f"A {sub_label} is typically used in a context where people" for sub_label in sub_labels
+                    ]
+                    similarities = [self.fast_cosine_similarity(det_text, target_text) for target_text in target_texts]
+                    self.similarity_mat[i][j] = np.mean(similarities)
                 else:
-                    self.similarity_mat[i][j] = self.cosine_similarity(
-                        f"A {self.id2label[str(i)]} is typically used in a context where people",
-                        f"A { self.labels[j]} is typically used in a context where people",
-                    )
+                    target_text = f"A {self.labels[j]} is typically used in a context where people"
+                    self.similarity_mat[i][j] = self.fast_cosine_similarity(det_text, target_text)
+
         self.logger.debug(
-            f"[Item Level] Similarity matrix generated, contians {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
+            f"[Item Level] Similarity matrix generated, contains {self.similarity_mat.shape[0]} semantic classes and {self.similarity_mat.shape[1]} target classes"
         )
 
     def calculate_similarity_room_target(self):
+        """优化后的房间与目标类相似度计算"""
+        # 预先生成所有房间的文本描述
+        room_texts = [f"A {room} is a space where people" for room in self.rooms]
+
         for i in range(len(self.rooms)):
+            room_text = room_texts[i]
+
             for j in range(len(self.labels)):
-                values = []
                 if "|" in self.labels[j]:
-                    for l in self.labels[j].split("|"):
-                        values.append(
-                            self.cosine_similarity(
-                                f"A {self.rooms[i]} is a space where people",
-                                f"A {l} is typically used in a context where people",
-                            )
-                        )
-                    self.similarity_mat_room_target[i][j] = np.mean(values)
+                    sub_labels = self.labels[j].split("|")
+                    target_texts = [
+                        f"A {sub_label} is typically used in a context where people" for sub_label in sub_labels
+                    ]
+                    similarities = [self.fast_cosine_similarity(room_text, target_text) for target_text in target_texts]
+                    self.similarity_mat_room_target[i][j] = np.mean(similarities)
                 else:
-                    self.similarity_mat_room_target[i][j] = self.cosine_similarity(
-                        f"A {self.rooms[i]} is a space where people",
-                        f"A {self.labels[j]} is typically used in a context where people",
-                    )
+                    target_text = f"A {self.labels[j]} is typically used in a context where people"
+                    self.similarity_mat_room_target[i][j] = self.fast_cosine_similarity(room_text, target_text)
+
         self.logger.debug(
-            f"[Room Level] Similarity matrix generated, contians {self.similarity_mat_room_target.shape[0]} room classes and {self.similarity_mat_room_target.shape[1]} target classes"
+            f"[Room Level] Similarity matrix generated, contains {self.similarity_mat_room_target.shape[0]} room classes and {self.similarity_mat_room_target.shape[1]} target classes"
         )
 
     def calculate_similarity_det_room(self):
-        for i in range(len(self.id2label)):
-            for j in range(len(self.rooms)):
-                values = []
-                self.similarity_mat_det_room[i][j] = self.cosine_similarity(
-                    f"A {self.id2label[str(i)]} is typically used in a context where people",
-                    f"A {self.rooms[j]} is a space where people",
-                )
-        self.logger.debug(
-            f"[Room Level] Similarity matrix generated, contians {self.similarity_mat_det_room.shape[0]} detection classes and {self.similarity_mat_det_room.shape[1]} room classes"
-        )
+        """优化后的检测类与房间相似度计算"""
+        # 预先生成所有检测类和房间类的文本描述
+        det_texts = [
+            f"A {self.id2label[str(i)]} is typically used in a context where people" for i in range(len(self.id2label))
+        ]
+        room_texts = [f"A {room} is a space where people" for room in self.rooms]
 
-    def cosine_similarity(self, label, target):
-        label_embedding = self._word2vec.encode(label, show_progress_bar=False)
-        target_embedding = self._word2vec.encode(target, show_progress_bar=False)
-        # 计算两个向量的点积
-        dot_product = np.dot(label_embedding, target_embedding)
-        # 计算两个向量的模长
-        norm_embedding1 = np.linalg.norm(label_embedding)
-        norm_embedding2 = np.linalg.norm(target_embedding)
-        # 计算余弦相似度
-        similarity = dot_product / (norm_embedding1 * norm_embedding2)
-        return similarity
+        for i in range(len(self.id2label)):
+            det_text = det_texts[i]
+
+            # 利用列表推导式一次性计算一行的所有相似度
+            self.similarity_mat_det_room[i] = [
+                self.fast_cosine_similarity(det_text, room_text) for room_text in room_texts
+            ]
+
+        self.logger.debug(
+            f"[Room Level] Similarity matrix generated, contains {self.similarity_mat_det_room.shape[0]} detection classes and {self.similarity_mat_det_room.shape[1]} room classes"
+        )
 
     def _sort_frontiers_by_value(
         self, observations: "TensorDict", frontiers: np.ndarray
     ) -> Tuple[np.ndarray, List[float]]:
-        WALL_CEILING_FLOOR = [0, 3, 5]
-        empty_scene_semantic_thresh = self.similarity_mat[
-            WALL_CEILING_FLOOR, self.labels.index(self._target_object)
-        ].mean()
-        # target_sim_thresh = np.mean(
-        #     [
-        #         self.empty_scene_blip2_thresh,
-        #         empty_scene_semantic_thresh,
-        #     ]
-        # )
+        # WALL_CEILING_FLOOR = [0, 3, 5]
+
         target_sim_thresh = 0
         target_id = self.labels.index(self._target_object)
-        # 1. get value for frontiers from semantic value map
-        # _, frointer_values_blip2 = self._value_map.sort_waypoints(frontiers, 0.5, sorted=False)
-        # _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
-        #     frontiers, 1, self.reduce_fn, "max", sorted=False
-        # )
-        # frontier_values_semantic = [v if v != 0 else empty_scene_semantic_thresh for v in frontier_values_semantic]
-        # calculate room score for each frontier， cause each frontier has a lot of detections around, and detections correlate to a specific room, so we can use the detections to calculate the room score fro each frontier
+
         _, frontier_values_room = self._semantic_value_map.waypoints_room_level_score(
             frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
         )
 
-        # values = np.mean([frontier_values_semantic, frointer_values_blip2, frontier_values_room], axis=0)
         values = np.mean([frontier_values_room], axis=0)
 
         sorted_inds = np.argsort([-v for v in values])  # type: ignore
         sorted_values = [values[i] for i in sorted_inds]
         sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
-        # self.logger.debug(
-        #     f"Frointer values: Semantic-{[round(v, 2) for v in frontier_values_semantic]}, Blip2-{[round(v, 2) for v in frointer_values_blip2]}, Room-{[round(v, 2) for v in frontier_values_room]}"
-        # )
         self.logger.debug(f"Frointer values:  Room-{[round(v, 2) for v in frontier_values_room]}")
         # 2. weighted with distance and density
         if np.all(np.array(sorted_values) < target_sim_thresh):
@@ -1947,7 +1983,7 @@ class ITMPolicyV16(ITMPolicyV11):
     ) -> Tuple[np.ndarray, List[float]]:
         # 1. get value for frontiers from semantic value map
         _, frontier_values_semantic = self._semantic_value_map.sort_waypoints(
-            frontiers, 0.75, self.reduce_fn, "max", sorted=False
+            frontiers, 1, self.reduce_fn, "max", sorted=False
         )
         sorted_inds = np.argsort([-v for v in frontier_values_semantic])  # type: ignore
         sorted_values = [frontier_values_semantic[i] for i in sorted_inds]

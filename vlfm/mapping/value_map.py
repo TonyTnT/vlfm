@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
+import cupy as cp
 
 from vlfm.mapping.base_map import BaseMap
 from vlfm.utils.geometry_utils import extract_yaw, get_rotation_matrix
@@ -169,7 +170,7 @@ class ValueMap(BaseMap):
             target_id (int): The target ID.
         """
         similarity = semantic_similarity_mat[:, target_id].reshape(1, 1, -1)
-        semantic_similarity_mat = semantic_map * similarity
+        semantic_similarity_mat = cp.asnumpy(semantic_map) * similarity
         self._value_map = semantic_similarity_mat
         return
 
@@ -279,11 +280,9 @@ class ValueMap(BaseMap):
 
         for det_ids in points_det_ids:
             det_names = [CONFIG_ADE20K_ID2LABEL["id2label"][str(det_id)] for det_id in det_ids]
-            print("point around has ", det_names)
             point_room_scores.append(sim_mat_det_room[det_ids, :])
-        # print("point_room_scores: ", point_room_scores)
 
-        # [x,x,x,x,x]
+        # # [x,x,x,x,x]
         target_room_scores = sim_mat_room_target[:, target_id]
         point_target_scores = []
         for point_scores in point_room_scores:

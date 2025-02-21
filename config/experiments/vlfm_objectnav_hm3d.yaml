@@ -49,8 +49,8 @@ habitat_baselines:
 
   eval:
     split: "val"
-    video_option: 
-      - "disk"
+    # video_option: 
+    #   - "disk"
 
   rl:
 

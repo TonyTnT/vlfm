@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from hydra.core.config_store import ConfigStore
 from torch import Tensor
-
+import time
 from vlfm.mapping.object_point_cloud_map import ObjectPointCloudMap
 from vlfm.mapping.obstacle_map import ObstacleMap
 from vlfm.obs_transformers.utils import image_resize
@@ -117,6 +117,8 @@ class BaseObjectNavPolicy(BasePolicy):
         Then, explores the scene until it finds the target object.
         Once the target object is found, it navigates to the object.
         """
+        start_time = time.time()
+
         self._pre_step(observations, masks)
 
         object_map_rgbd = self._observations_cache["object_map_rgbd"]
@@ -140,7 +142,10 @@ class BaseObjectNavPolicy(BasePolicy):
         action_numpy = pointnav_action.detach().cpu().numpy()[0]
         if len(action_numpy) == 1:
             action_numpy = action_numpy[0]
-        print(f"Step: {self._num_steps} | Mode: {mode} | Action: {action_numpy}")
+
+        print(
+            f"Step: {self._num_steps} | Mode: {mode} | Action: {action_numpy} | Took {time.time() - start_time:.4f} seconds"
+        )
         self._policy_info.update(self._get_policy_info(detections[0]))
         self._num_steps += 1
 
