@@ -23,31 +23,7 @@ from vlfm.vlm.grounding_dino import ObjectDetections
 
 from ..mapping.obstacle_map import ObstacleMap
 from .base_objectnav_policy import BaseObjectNavPolicy, VLFMConfig
-from .itm_policy import (
-    ITMPolicy,
-    ITMPolicyV2,
-    ITMPolicyV3,
-    ITMPolicyV4,
-    ITMPolicyV5,
-    ITMPolicyV6,
-    ITMPolicyV7,
-    ITMPolicyV8,
-    ITMPolicyV9,
-    ITMPolicyV10,
-    ITMPolicyV9Fusion,
-    ITMPolicyV11,
-    ITMPolicyV12,
-    ITMPolicyV13,
-    ITMPolicyV14,
-    ITMPolicyV15,
-    ITMPolicyV16,
-    ITMPolicyV17,
-    ITMPolicyV18,
-    ITMPolicyV19,
-    ITMPolicyV2_YOLOWORLD,
-    ITMPolicyV2_YOLOv10,
-    ITMPolicyV9_YOLOv10,
-)
+from .itm_policy import *
 
 HM3D_ID_TO_NAME = ["chair", "bed", "potted plant", "toilet", "tv", "couch"]
 MP3D_ID_TO_NAME = [
@@ -397,6 +373,11 @@ class HabitatITMPolicyV18(HabitatMixin, ITMPolicyV18):
 
 @baseline_registry.register_policy
 class HabitatITMPolicyV19(HabitatMixin, ITMPolicyV19):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV20(HabitatMixin, ITMPolicyV20):
     pass
 
 

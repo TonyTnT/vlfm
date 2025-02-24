@@ -1997,3 +1997,72 @@ class ITMPolicyV10(ITMPolicyV9):
         super().__init__(*args, **kwargs)
         self.reduce_fn = lambda i: np.max(i, axis=-1)
         self.reduce_fn_vis = lambda i: np.max(i, axis=-1)
+
+
+class ITMPolicyV20(BaseITMPolicy):
+    """
+    Only geometry cues
+    """
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        start_time = time.time()
+        self._pre_step(observations, masks)
+        self.logger.info(f"{self.__class__.__name__} took {time.time() - start_time:.4f} seconds")
+        return super().act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        self.logger.debug("Arounding frontiers are not with high correlated to the target, searching by the density")
+        robot_xy = self._observations_cache["robot_xy"]
+        # calculate normalize distances
+        distances = np.linalg.norm(frontiers - robot_xy, axis=1)
+        normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+        normalized_distances = np.nan_to_num(normalized_distances)
+        normalized_densities = self.get_densities(frontiers, 2)
+        weights = np.array([0.5, 0.5])
+        self.logger.debug(f"Normalized distances: {normalized_distances}, densities: {normalized_densities}")
+        combined_values = np.column_stack((normalized_distances, normalized_densities))
+        sorted_values = np.dot(combined_values, weights)
+
+        sorted_indices = np.argsort(sorted_values)[::-1]
+        sorted_frontiers = frontiers[sorted_indices]
+        sorted_values = sorted_values[sorted_indices]
+        return sorted_frontiers, sorted_values
+
+    def get_densities(self, frontiers, radius):
+        """
+        计算每个 frontier 在指定半径内的密度。
+
+        参数:
+        frontiers (np.ndarray): 形状为 (N, 2) 的数组，表示 N 个 frontiers 的坐标。
+        radius (float): 指定的半径。
+
+        返回:
+        densities (np.ndarray): 形状为 (N,) 的数组，表示每个 frontier 的密度。
+        """
+        num_frontiers = frontiers.shape[0]
+        densities = np.zeros(num_frontiers, dtype=int)
+
+        # 计算距离矩阵
+        distance_matrix = np.linalg.norm(frontiers[:, np.newaxis, :] - frontiers[np.newaxis, :, :], axis=2)
+
+        # 计算密度
+        for i in range(num_frontiers):
+            densities[i] = np.sum(distance_matrix[i] <= radius) - 1  # 减去自身
+
+        # 归一化密度
+        max_density = np.max(densities)
+        if max_density > 0:
+            normalized_densities = (densities - np.min(densities)) / (max_density - np.min(densities))
+        else:
+            normalized_densities = densities
+        normalized_densities = np.nan_to_num(normalized_densities)
+        return normalized_densities
