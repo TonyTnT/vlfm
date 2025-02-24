@@ -266,7 +266,13 @@ def get_confidence(z, x, fov):
 
 
 def get_point_cloud(
-    depth_image: np.ndarray, mask: np.ndarray, fx: float, fy: float, fov: float = None, semantic_mask: np.array = None
+    depth_image: np.ndarray,
+    mask: np.ndarray,
+    fx: float,
+    fy: float,
+    fov: float = None,
+    semantic_mask: np.array = None,
+    pcd_conf_threshold: float = 0.5,
 ) -> np.ndarray:
     """Calculates the 3D coordinates (x, y, z) of points in the depth image based on
     the horizontal field of view (HFOV), the image width and height, the depth values,
@@ -287,10 +293,12 @@ def get_point_cloud(
     y = (v - depth_image.shape[0] // 2) * z / fy
     if semantic_mask is not None:
         semantic_labels = semantic_mask[v, u]
-        x_pixel = x / 20
-        # y_pixel = y / 20
-        z_pixel = z / 20
-        cloud = np.stack((z, -x, -y, semantic_labels, get_confidence(z, x, fov)), axis=-1)
+        conf = get_confidence(z, x, fov)
+        mask_conf = conf > pcd_conf_threshold
+        cloud = np.stack(
+            (z[mask_conf], -x[mask_conf], -y[mask_conf], semantic_labels[mask_conf], conf[mask_conf]), axis=-1
+        )
+
     else:
         cloud = np.stack((z, -x, -y), axis=-1)
 

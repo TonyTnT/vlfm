@@ -1219,8 +1219,8 @@ class ITMPolicyV11(BaseITMPolicy):
         )
 
         self._semantic_map = SemanticMap(
-            min_height=0.15,
-            max_height=0.88,
+            min_height=-1,  # 因为filter的时候会remove floor
+            max_height=2.3,  # 见pcd_show.py
             agent_radius=0.18,
             semantic_id=self.id2label,
             multi_channel=len(self.id2label),

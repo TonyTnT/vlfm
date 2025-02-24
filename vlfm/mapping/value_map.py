@@ -227,6 +227,10 @@ class ValueMap(BaseMap):
             # Use np.argsort to get the indices of the sorted values
             sorted_inds = np.argsort([-v for v in values])  # type: ignore
             sorted_values = [values[i] for i in sorted_inds]
+            epsilon = 1e-10
+            sorted_values = (sorted_values - np.min(sorted_values)) / (
+                np.max(sorted_values) - np.min(sorted_values) + epsilon
+            )
             sorted_frontiers = np.array([waypoints[i] for i in sorted_inds])
 
             return sorted_frontiers, sorted_values

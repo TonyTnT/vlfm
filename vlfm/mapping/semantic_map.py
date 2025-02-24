@@ -59,6 +59,42 @@ class SemanticMap(BaseMap):
         kernel_size = int(kernel_size) + (int(kernel_size) % 2 == 0)
         self._navigable_kernel = np.ones((kernel_size, kernel_size), np.uint8)
         self.semantic_id = semantic_id
+        self.remove_ids = [
+            2,  # sky (天空)
+            3,  # floor (地板, 与 target 空间信息关联不大)
+            5,  # ceiling (天花板，与 target 空间信息关联不大)
+            4,  # tree (树木，特指室外大树)
+            6,  # road (道路)
+            9,  # grass (草地)
+            16,  # mountain (山)
+            21,  # water (自然水体)
+            26,  # sea (海洋)
+            29,  # field (田野)
+            34,  # rock (岩石)
+            46,  # sand (沙子)
+            48,  # skyscraper (摩天大楼整体)
+            54,  # runway (飞机跑道)
+            60,  # river (河流)
+            68,  # hill (山丘)
+            72,  # palm (棕榈树)
+            80,  # bus (公交车)
+            83,  # truck (卡车)
+            84,  # tower (塔)
+            86,  # awning (雨篷/遮阳棚)
+            90,  # airplane (飞机)
+            91,  # dirt track (泥路)
+            103,  # ship (轮船)
+            104,  # fountain (大型喷泉)
+            113,  # waterfall (瀑布)
+            114,  # tent (帐篷)
+            116,  # minibike (迷你摩托车)
+            122,  # tank (坦克)
+            128,  # lake (湖泊)
+            140,  # pier (码头)
+            32,  # fence (围栏)
+            61,  # bridge (桥梁)
+            136,  # traffic light (交通信号灯)
+        ]
 
     def reset(self) -> None:
         super().reset()
@@ -114,6 +150,7 @@ class SemanticMap(BaseMap):
 
                 scaled_depth = filled_depth * (max_depth - min_depth) + min_depth
                 mask = scaled_depth < max_depth
+                # get_point_cloud: 从深度图中获取点云, 会filter cls conf < 0.5
                 semantic_pcd_camera_frame = get_point_cloud(
                     scaled_depth, mask, fx, fy, fov=topdown_fov, semantic_mask=semantic
                 )
@@ -123,7 +160,8 @@ class SemanticMap(BaseMap):
                 obstacle_cloud = filter_points_by_height(
                     semantic_pcd_episodic_frame, self._min_height, self._max_height
                 )
-                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=[2, 3, 5])
+                # 移除非室内类别物品
+                semantic_cloud = filter_points_by_class(obstacle_cloud, cls_id=self.remove_ids)
 
                 # Populate topdown map with obstacle locations
                 xy_points = semantic_cloud[:, :2]
