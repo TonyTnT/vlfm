@@ -223,6 +223,9 @@ class ValueMap(BaseMap):
         if self._value_channels > 1:
             assert reduce_fn is not None, "Must provide a reduction function when using multiple value channels."
             values = reduce_fn(np.array(values))
+
+        sorted_frontiers = np.array(waypoints)
+        sorted_values = values
         if sorted:
             # Use np.argsort to get the indices of the sorted values
             sorted_inds = np.argsort([-v for v in values])  # type: ignore
@@ -232,10 +235,44 @@ class ValueMap(BaseMap):
                 np.max(sorted_values) - np.min(sorted_values) + epsilon
             )
             sorted_frontiers = np.array([waypoints[i] for i in sorted_inds])
+        sorted_values = self.quantile_normalize(sorted_values)
+        return sorted_frontiers, sorted_values
 
-            return sorted_frontiers, sorted_values
-        else:
-            return np.array(waypoints), values
+    def quantile_normalize(self, scores):
+        """
+        使用NumPy实现分位数归一化
+
+        参数:
+            scores: 一维数组，需要归一化的分数
+
+        返回:
+            归一化后的分数，范围在[0,1]之间，分布更均匀
+        """
+        # 确保输入是numpy数组
+        scores = np.array(scores)
+
+        if len(scores) == 0:
+            return scores
+
+        # 获取排序后的索引
+        sorted_indices = np.argsort(scores)
+
+        # 计算排名 (从1开始)
+        ranks = np.empty_like(sorted_indices, dtype=float)
+        ranks[sorted_indices] = np.arange(1, len(scores) + 1)
+
+        # 处理重复值 - 为相同的值分配平均排名
+        unique_values, value_indices = np.unique(scores, return_inverse=True)
+
+        for value_idx in range(len(unique_values)):
+            mask = value_indices == value_idx
+            if np.sum(mask) > 1:  # 如果有重复值
+                ranks[mask] = np.mean(ranks[mask])
+
+        # 归一化排名到[0,1]区间
+        normalized_scores = (ranks - 0.5) / len(scores)  # 减0.5使得范围在[0,1]之间均匀分布
+
+        return normalized_scores
 
     def waypoints_room_level_score(
         self,
@@ -295,7 +332,8 @@ class ValueMap(BaseMap):
             else:
                 point_target_scores.append(np.mean(np.dot(point_scores, target_room_scores)))
 
-        return np.array(waypoints), point_target_scores
+        sorted_values = self.quantile_normalize(point_target_scores)
+        return np.array(waypoints), sorted_values
 
     def visualize(
         self,

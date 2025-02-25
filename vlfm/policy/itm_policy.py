@@ -1698,11 +1698,6 @@ class ITMPolicyV19(ITMPolicyV11):
         self.calculate_similarity_room_target()
         self.calculate_similarity_det_room()
 
-        # self.similarity_mat_det_target = np.dot(self.similarity_mat_det_room, self.similarity_mat_room_target)
-        # target_id = self.labels.index(self._target_object)
-        # # posibilities detection and target are in same room
-        # self.similarity_vec_det_target = self.similarity_mat_det_target[:, target_id]
-
     def precompute_embeddings(self):
         """预计算并缓存所有文本的嵌入向量"""
         self.embeddings_cache = {}
@@ -1813,57 +1808,18 @@ class ITMPolicyV19(ITMPolicyV11):
     def _sort_frontiers_by_value(
         self, observations: "TensorDict", frontiers: np.ndarray
     ) -> Tuple[np.ndarray, List[float]]:
-        # WALL_CEILING_FLOOR = [0, 3, 5]
 
-        target_sim_thresh = 0
         target_id = self.labels.index(self._target_object)
 
-        _, frontier_values_room = self._semantic_value_map.waypoints_room_level_score(
+        _, frontier_room_values = self._semantic_value_map.waypoints_room_level_score(
             frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
         )
 
-        values = np.mean([frontier_values_room], axis=0)
-
-        sorted_inds = np.argsort([-v for v in values])  # type: ignore
-        sorted_values = [values[i] for i in sorted_inds]
-        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
-        self.logger.debug(f"Frointer values:  Room-{[round(v, 2) for v in frontier_values_room]}")
-        # 2. weighted with distance and density
-        if np.all(np.array(sorted_values) < target_sim_thresh):
-            self.logger.debug(
-                "Arounding frontiers are not with high correlated to the target, searching by the density"
-            )
-            robot_xy = self._observations_cache["robot_xy"]
-            # calculate normalize distances
-            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
-            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
-            normalized_distances = np.nan_to_num(normalized_distances)
-            normalized_densities = self.get_densities(sorted_frontiers, 2)
-            weights = np.array([0.2, 0.3, 0.5])
-            self.logger.debug(f"Normalized distances: {normalized_distances}, densities: {normalized_densities}")
-            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
-            sorted_values = np.dot(combined_values, weights)
-
-            sorted_indices = np.argsort(sorted_values)[::-1]
-            sorted_frontiers = sorted_frontiers[sorted_indices]
-            sorted_values = sorted_values[sorted_indices]
-            return sorted_frontiers, sorted_values
-        else:
-            self.logger.debug("Arounding frontiers have some similar objects, searching by the similarity")
-            robot_xy = self._observations_cache["robot_xy"]
-            # calculate normalize distances
-            distances = np.linalg.norm(sorted_frontiers - robot_xy, axis=1)
-            normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
-            normalized_distances = np.nan_to_num(normalized_distances)
-            normalized_densities = self.get_densities(sorted_frontiers, 2)
-            weights = np.array([0.7, 0.1, 0.2])
-            combined_values = np.column_stack((sorted_values, normalized_distances, normalized_densities))
-            sorted_values = np.dot(combined_values, weights)
-
-            sorted_indices = np.argsort(sorted_values)[::-1]
-            sorted_frontiers = sorted_frontiers[sorted_indices]
-            sorted_values = sorted_values[sorted_indices]
-            return sorted_frontiers, sorted_values
+        sorted_inds = np.argsort([-v for v in frontier_room_values])  # type: ignore
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = frontier_room_values[sorted_inds]
+        self.logger.debug(f"Frointer values:  Room-{[round(v, 2) for v in frontier_room_values]}")
+        return sorted_frontiers, sorted_values
 
 
 class ITMPolicyV12(ITMPolicyV11):
@@ -1986,8 +1942,8 @@ class ITMPolicyV16(ITMPolicyV11):
             frontiers, 1, self.reduce_fn, "max", sorted=False
         )
         sorted_inds = np.argsort([-v for v in frontier_values_semantic])  # type: ignore
-        sorted_values = [frontier_values_semantic[i] for i in sorted_inds]
-        sorted_frontiers = np.array([frontiers[i] for i in sorted_inds])
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = frontier_values_semantic[sorted_inds]
         self.logger.debug(f"Frointer values: Semantic-{frontier_values_semantic}")
         return sorted_frontiers, sorted_values
 
