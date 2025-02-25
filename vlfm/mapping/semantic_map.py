@@ -11,6 +11,8 @@ from vlfm.mapping.base_map import BaseMap
 from vlfm.utils.geometry_utils import extract_yaw, get_point_cloud, transform_points
 from vlfm.utils.img_utils import fill_small_holes
 from vlfm.utils.ade20k_id2label import CONFIG as CONFIG_ADE20K_ID2LABEL
+import os
+import open3d as o3d
 
 
 class SemanticMap(BaseMap):

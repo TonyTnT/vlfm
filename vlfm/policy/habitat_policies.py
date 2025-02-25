@@ -381,6 +381,31 @@ class HabitatITMPolicyV20(HabitatMixin, ITMPolicyV20):
     pass
 
 
+@baseline_registry.register_policy
+class HabitatITMPolicyV21(HabitatMixin, ITMPolicyV21):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV22(HabitatMixin, ITMPolicyV22):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV23(HabitatMixin, ITMPolicyV23):
+    pass
+
+
+@baseline_registry.register_policy
+class HabitatITMPolicyV24(HabitatMixin, ITMPolicyV24):
+    pass
+
+
+# @baseline_registry.register_policy
+# class HabitatITMPolicyV20(HabitatMixin, ITMPolicyV20):
+#     pass
+
+
 @dataclass
 class VLFMPolicyConfig(VLFMConfig, PolicyConfig):
     pass

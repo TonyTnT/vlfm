@@ -1220,7 +1220,7 @@ class ITMPolicyV11(BaseITMPolicy):
 
         self._semantic_map = SemanticMap(
             min_height=-1,  # 因为filter的时候会remove floor
-            max_height=2.3,  # 见pcd_show.py
+            max_height=2.1,  # 见pcd_show.py
             agent_radius=0.18,
             semantic_id=self.id2label,
             multi_channel=len(self.id2label),
@@ -1698,6 +1698,19 @@ class ITMPolicyV19(ITMPolicyV11):
         self.calculate_similarity_room_target()
         self.calculate_similarity_det_room()
 
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        self._update_semantic_value_map()
+        return super(ITMPolicyV11, self).act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
     def precompute_embeddings(self):
         """预计算并缓存所有文本的嵌入向量"""
         self.embeddings_cache = {}
@@ -2022,3 +2035,258 @@ class ITMPolicyV20(BaseITMPolicy):
             normalized_densities = densities
         normalized_densities = np.nan_to_num(normalized_densities)
         return normalized_densities
+
+
+class ITMPolicyV21(ITMPolicyV19):
+    """
+
+    room score & item score
+
+    """
+
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(exploration_thresh, *args, **kwargs)
+        # 动态权重， 根据分布的离散程度自动调整权重，这可能有助于平衡集中分布和分散分布的影响
+        self.dynamic_weights = True
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        self._update_semantic_value_map()
+        return super(ITMPolicyV11, self).act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+
+        target_id = self.labels.index(self._target_object)
+
+        _, frontier_room_values = self._semantic_value_map.waypoints_room_level_score(
+            frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
+        )
+
+        _, frontier_semantic_values = self._semantic_value_map.sort_waypoints(
+            frontiers, 1, self.reduce_fn, "max", sorted=False
+        )
+
+        # 动态权重调整 (可选)
+        if self.dynamic_weights:
+            # 根据分布的离散程度调整权重
+            room_std = np.std(frontier_room_values)
+            item_std = np.std(frontier_semantic_values)
+
+            # 标准差越小，分布越集中，权重调低
+            total_std = room_std + item_std
+            if total_std > 0:
+                weights = (room_std / total_std, item_std / total_std)
+                print(f"动态调整的权重 (room, item): {weights}")
+        else:
+            weights = [0.5, 0.5]
+        # 计算总分
+        weighted_values = weights[0] * frontier_room_values + weights[1] * frontier_semantic_values
+
+        sorted_inds = np.argsort([-v for v in weighted_values])  # type: ignore
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = weighted_values[sorted_inds]
+        self.logger.debug(f"Frointer values:  Weighted Room-Item Score-{[round(v, 2) for v in weighted_values]}")
+        return sorted_frontiers, sorted_values
+
+
+class ITMPolicyV22(ITMPolicyV19):
+    """
+
+    room score & geo score
+
+    """
+
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(exploration_thresh, *args, **kwargs)
+        # 动态权重， 根据分布的离散程度自动调整权重，这可能有助于平衡集中分布和分散分布的影响
+        self.dynamic_weights = True
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+
+        target_id = self.labels.index(self._target_object)
+
+        _, frontier_room_values = self._semantic_value_map.waypoints_room_level_score(
+            frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
+        )
+
+        robot_xy = self._observations_cache["robot_xy"]
+        # calculate normalize distances
+        distances = np.linalg.norm(frontiers - robot_xy, axis=1)
+        normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+        normalized_distances = np.nan_to_num(normalized_distances)
+        normalized_densities = self.get_densities(frontiers, 2)
+        weights = np.array([0.5, 0.5])
+        combined_values = np.column_stack((normalized_distances, normalized_densities))
+        frontier_geometry_values = np.dot(combined_values, weights)
+        self.logger.debug(
+            f"Frontier room values: {frontier_room_values}, Frontier geometry values: {frontier_geometry_values}"
+        )
+
+        # 动态权重调整 (可选)
+        if self.dynamic_weights:
+            # 根据分布的离散程度调整权重
+            room_std = np.std(frontier_room_values)
+            geometry_std = np.std(frontier_geometry_values)
+
+            # 标准差越小，分布越集中，权重调低
+            total_std = room_std + geometry_std
+            if total_std > 0:
+                weights = (room_std / total_std, geometry_std / total_std)
+                self.logger.debug(f"动态调整的权重 (room, geometry): {weights}")
+        else:
+            weights = [0.5, 0.5]
+        # 计算总分
+        weighted_values = weights[0] * frontier_room_values + weights[1] * frontier_geometry_values
+
+        sorted_inds = np.argsort([-v for v in weighted_values])  # type: ignore
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = weighted_values[sorted_inds]
+        self.logger.debug(f"Frointer values:  Weighted Room-Geo Score-{[round(v, 2) for v in weighted_values]}")
+        return sorted_frontiers, sorted_values
+
+
+class ITMPolicyV23(ITMPolicyV16):
+    """
+
+    item score & geo score
+
+    """
+
+    def __init__(self, exploration_thresh: float, *args: Any, **kwargs: Any) -> None:
+        super().__init__(exploration_thresh, *args, **kwargs)
+        # 动态权重， 根据分布的离散程度自动调整权重，这可能有助于平衡集中分布和分散分布的影响
+        self.dynamic_weights = True
+
+    def act(
+        self,
+        observations: Dict,
+        rnn_hidden_states: Any,
+        prev_actions: Any,
+        masks: Tensor,
+        deterministic: bool = False,
+    ) -> Any:
+        self._pre_step(observations, masks)
+        self._update_semantic_map()
+        self._update_semantic_value_map()
+        return super(ITMPolicyV11, self).act(observations, rnn_hidden_states, prev_actions, masks, deterministic)
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+        # 1. get value for frontiers from semantic value map
+        _, frontier_semantic_values = self._semantic_value_map.sort_waypoints(
+            frontiers, 1, self.reduce_fn, "max", sorted=False
+        )
+
+        robot_xy = self._observations_cache["robot_xy"]
+        # calculate normalize distances
+        distances = np.linalg.norm(frontiers - robot_xy, axis=1)
+        normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+        normalized_distances = np.nan_to_num(normalized_distances)
+        normalized_densities = self.get_densities(frontiers, 2)
+        weights = np.array([0.5, 0.5])
+        combined_values = np.column_stack((normalized_distances, normalized_densities))
+        frontier_geometry_values = np.dot(combined_values, weights)
+        self.logger.debug(
+            f"Frontier semantic values: {frontier_semantic_values}, Frontier geometry values: {frontier_geometry_values}"
+        )
+        # 动态权重调整 (可选)
+        if self.dynamic_weights:
+            # 根据分布的离散程度调整权重
+            item_std = np.std(frontier_semantic_values)
+            geometry_std = np.std(frontier_geometry_values)
+
+            # 标准差越小，分布越集中，权重调低
+            total_std = item_std + geometry_std
+            if total_std > 0:
+                weights = (item_std / total_std, geometry_std / total_std)
+                self.logger.debug(f"动态调整的权重 (item, geometry): {weights}")
+        else:
+            weights = [0.5, 0.5]
+        # 计算总分
+        weighted_values = weights[0] * frontier_semantic_values + weights[1] * frontier_geometry_values
+
+        sorted_inds = np.argsort([-v for v in weighted_values])  # type: ignore
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = weighted_values[sorted_inds]
+        self.logger.debug(f"Frointer values:  Weighted Item-Geo Score-{[round(v, 2) for v in weighted_values]}")
+        return sorted_frontiers, sorted_values
+
+
+class ITMPolicyV24(ITMPolicyV21):
+    """
+    room + item + geo , dynamic weighted
+
+    """
+
+    def _sort_frontiers_by_value(
+        self, observations: "TensorDict", frontiers: np.ndarray
+    ) -> Tuple[np.ndarray, List[float]]:
+
+        target_id = self.labels.index(self._target_object)
+
+        _, frontier_room_values = self._semantic_value_map.waypoints_room_level_score(
+            frontiers, target_id, 1, False, self.similarity_mat_room_target, self.similarity_mat_det_room
+        )
+
+        _, frontier_semantic_values = self._semantic_value_map.sort_waypoints(
+            frontiers, 1, self.reduce_fn, "max", sorted=False
+        )
+
+        robot_xy = self._observations_cache["robot_xy"]
+        # calculate normalize distances
+        distances = np.linalg.norm(frontiers - robot_xy, axis=1)
+        normalized_distances = 1 - (distances - np.min(distances)) / (np.max(distances) - np.min(distances))
+        normalized_distances = np.nan_to_num(normalized_distances)
+        normalized_densities = self.get_densities(frontiers, 2)
+        geo_weights = np.array([0.5, 0.5])
+        combined_values = np.column_stack((normalized_distances, normalized_densities))
+        frontier_geometry_values = np.dot(combined_values, geo_weights)
+
+        weights = [1 / 3, 1 / 3, 1 / 3]
+        # 动态权重调整 (可选)
+        if self.dynamic_weights:
+            # 根据分布的离散程度调整权重
+            room_std = np.std(frontier_room_values)
+            item_std = np.std(frontier_semantic_values)
+            geometry_std = np.std(frontier_geometry_values)
+
+            # 标准差越小，分布越集中，权重调低
+            total_std = room_std + item_std + geometry_std
+            if total_std > 0:
+                weights = [room_std / total_std, item_std / total_std, geometry_std / total_std]
+        self.logger.info(f"after dynamic weighted (room, item, geo): {weights}")
+
+        # 计算总分
+        weighted_values = (
+            weights[0] * frontier_room_values
+            + weights[1] * frontier_semantic_values
+            + weights[2] * frontier_geometry_values
+        )
+
+        sorted_room_inds = np.argsort([-v for v in frontier_room_values])  # type: ignore
+        sorted_semantic_inds = np.argsort([-v for v in frontier_semantic_values])  # type: ignore
+        sorted_geo_inds = np.argsort([-v for v in frontier_geometry_values])  # type: ignore
+
+        sorted_inds = np.argsort([-v for v in weighted_values])  # type: ignore
+
+        self.logger.info(
+            f"\n\t Weighted sort: {sorted_inds} \n\t Room sort: {sorted_room_inds} \n\t Semantic sort: {sorted_semantic_inds} \n\t Geo sort: {sorted_geo_inds}"
+        )
+
+        sorted_frontiers = frontiers[sorted_inds]
+        sorted_values = weighted_values[sorted_inds]
+        # self.logger.info(f"Frointer values:  Weighted Room-Item-Geo Score-{[round(v, 2) for v in weighted_values]}")
+        return sorted_frontiers, sorted_values
