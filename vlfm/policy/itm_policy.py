@@ -1186,7 +1186,7 @@ class ITMPolicyV11(BaseITMPolicy):
         self._word2vec = SentenceTransformer(
             os.path.join(
                 os.path.expanduser("~"),
-                ".cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2/snapshots/84f2bcc00d77236f9e89c8a360a00fb1139bf47d",
+                ".cache/huggingface/hub/models--sentence-transformers--all-mpnet-base-v2/snapshots/9a3225965996d404b775526de6dbfe85d3368642",
             )
         )
         self.id2label = CONFIG_ADE20K_ID2LABEL["id2label"]

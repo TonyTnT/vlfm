@@ -190,3 +190,5 @@ habitat-lab/
 GroundingDINO/
 __pycache__/
 *.pyc
+
+test_room_height/*

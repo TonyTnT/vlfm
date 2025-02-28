@@ -19,6 +19,14 @@ from vlfm.policy.itm_policy import (
     ITMPolicyV14,
     ITMPolicyV15,
     ITMPolicyV16,
+    ITMPolicyV17,
+    ITMPolicyV18,
+    ITMPolicyV19,
+    ITMPolicyV20,
+    ITMPolicyV21,
+    ITMPolicyV22,
+    ITMPolicyV23,
+    ITMPolicyV24,
 )
 from vlfm.utils.geometry_utils import xyz_yaw_to_tf_matrix
 from vlfm.vlm.grounding_dino import ObjectDetections
@@ -197,4 +205,36 @@ class SemExpITMPolicyV15(SemExpMixin, ITMPolicyV15):
 
 
 class SemExpITMPolicyV16(SemExpMixin, ITMPolicyV16):
+    pass
+
+
+class SemExpITMPolicyV17(SemExpMixin, ITMPolicyV17):
+    pass
+
+
+class SemExpITMPolicyV18(SemExpMixin, ITMPolicyV18):
+    pass
+
+
+class SemExpITMPolicyV19(SemExpMixin, ITMPolicyV19):
+    pass
+
+
+class SemExpITMPolicyV20(SemExpMixin, ITMPolicyV20):
+    pass
+
+
+class SemExpITMPolicyV21(SemExpMixin, ITMPolicyV21):
+    pass
+
+
+class SemExpITMPolicyV22(SemExpMixin, ITMPolicyV22):
+    pass
+
+
+class SemExpITMPolicyV23(SemExpMixin, ITMPolicyV23):
+    pass
+
+
+class SemExpITMPolicyV24(SemExpMixin, ITMPolicyV24):
     pass

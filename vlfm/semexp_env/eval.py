@@ -8,12 +8,12 @@ import torch
 import sys
 import csv
 
+import sys
 
-try:
-    from vlfm.object_goal_navigation.arguments import get_args
-    from vlfm.object_goal_navigation.envs import make_vec_envs
-except Exception as e:
-    print(f"Object Goal Navigation not found. {e}")
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
+
+from vlfm.object_goal_navigation.arguments import get_args
+from vlfm.object_goal_navigation.envs import make_vec_envs
 
 from moviepy.editor import ImageSequenceClip
 
@@ -26,6 +26,14 @@ from vlfm.semexp_env.semexp_policy import (
     SemExpITMPolicyV14,
     SemExpITMPolicyV15,
     SemExpITMPolicyV16,
+    SemExpITMPolicyV17,
+    SemExpITMPolicyV18,
+    SemExpITMPolicyV19,
+    SemExpITMPolicyV20,
+    SemExpITMPolicyV21,
+    SemExpITMPolicyV22,
+    SemExpITMPolicyV23,
+    SemExpITMPolicyV24,
 )
 from vlfm.utils.img_utils import reorient_rescale_map, resize_images
 from vlfm.utils.log_saver import is_evaluated, log_episode
@@ -39,8 +47,8 @@ args.num_processes = 1
 args.num_processes_on_first_gpu = 1
 args.agent = "vlfm"  # Doesn't really matter as long as it's not "sem_exp"
 args.split = "val"
-args.task_config = "/home/chenx2/vlfm/vlfm/semexp_env/objnav_gibson_vlfm.yaml"
-args.scene_name = os.environ.get("SCENE_NAME", "EMPTY")
+args.task_config = os.path.join(os.path.expanduser("~"), "vlfm/vlfm/semexp_env/objnav_gibson_vlfm.yaml")
+args.scene_name = os.environ.get("SCENE_NAME", "Collierville")
 # Ensure a random seed
 # args.seed = int(time.time() * 1000) % 2**32
 args.seed = 42
@@ -131,7 +139,7 @@ def main() -> None:
                     "distance_to_goal": infos[0]["distance_to_goal"],
                     "target_object": target_object,
                 }
-                folder = "../VLFMExp/"
+                folder = "../VLFMExp/gibson_exp"
                 if not os.path.exists(folder):
                     os.makedirs(folder)
                 csv_file = os.path.join(folder, f"{policy_name}_{scene_id}_metrics.csv")

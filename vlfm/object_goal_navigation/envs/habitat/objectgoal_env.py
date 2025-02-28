@@ -7,6 +7,7 @@ import numpy as np
 import quaternion
 import skimage.morphology
 import habitat
+import os
 
 from ..utils.fmm_planner import FMMPlanner
 from ...constants import coco_categories
@@ -92,7 +93,7 @@ class ObjectGoal_Env(habitat.RLEnv):
 
         args = self.args
         print(self.habitat_env.sim.config)
-        self.scene_path = self.habitat_env.sim.curr_scene_name
+        self.scene_path = os.environ.get("SCENE_NAME", "Collierville")
 
         scene_name = self.scene_path.split("/")[-1].split(".")[0]
 
@@ -166,7 +167,7 @@ class ObjectGoal_Env(habitat.RLEnv):
 
         args = self.args
 
-        self.scene_path = self.habitat_env.sim.curr_scene_name
+        self.scene_path = os.environ.get("SCENE_NAME", "Collierville")
         scene_name = self.scene_path.split("/")[-1].split(".")[0]
 
         scene_info = self.dataset_info[scene_name]
@@ -320,10 +321,10 @@ class ObjectGoal_Env(habitat.RLEnv):
 
         if new_scene:
             obs = super().reset()
-            self.scene_name = self.habitat_env.sim.curr_scene_name
+            self.scene_name = os.environ.get("SCENE_NAME", "Collierville")
             print("Changing scene: {}/{}".format(self.rank, self.scene_name))
 
-        self.scene_path = self.habitat_env.sim.curr_scene_name
+        self.scene_path = os.environ.get("SCENE_NAME", "Collierville")
 
         if self.split == "val":
             obs = self.load_new_episode()

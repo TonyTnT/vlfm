@@ -19,7 +19,7 @@ try:
 
     # if habitat_version == "0.1.5":
     if habitat_version == "0.2.1":
-        print("Using habitat 0.1.5; assuming SemExp code is being used")
+        print("Using habitat 0.2.1; assuming SemExp code is being used")
 
         class PointNavResNetTensorOutputPolicy(PointNavResNetPolicy):
             def act(self, *args: Any, **kwargs: Any) -> Tuple[Tensor, Tensor]:

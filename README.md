@@ -179,4 +179,35 @@ If you use VLFM in your research, please use the following BibTeX entry.
   booktitle={International Conference on Robotics and Automation (ICRA)},
   year={2024}
 }
+
+
+
 ```
+
+To evaluate on Gibson, run the following:
+```bash 
+conda activate gibson
+
+
+HF_ENDPOINT=https://hf-mirror.com https_proxy=127.0.0.1:7890 SCENE_NAM
+E=Corozal POLICY_NAME=SemExpITMPolicyV24 BLIP2ITM_PORT=12182 GROUNDING_DINO_PORT=12181 SAM_PORT=12183 YOLOV7_PORT=12184 S
+SA_PORT=12185 python vlfm/semexp_env/eval.py
+
+
+```
+
+- Collierville
+- Corozal
+- Darden
+- Markleeville
+- Wiconisco
+
+
+To evaluate on HM3D, run the following:
+```bash 
+
+BLIP2ITM_PORT=12182 GROUNDING_DINO_PORT=12181 SAM_PORT=12183 YOLOV7_PORT=12184 SSA_PORT=12185 LOG_LEVEL=INFO HF_ENDPOINT=https://hf-mirror.com python -m vlfm.run habitat.dataset.content_scenes='["svBbv1Pavdk"]' habitat_baselines.video_dir="../VLFMExp/video_dir_19_svBbv1Pavdk" habitat_baselines.rl.policy.name="HabitatITMPolicyV19"
+
+```
+
+
