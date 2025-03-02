@@ -10,9 +10,7 @@ from frontier_exploration.base_explorer import BaseExplorer
 from habitat.tasks.nav.object_nav_task import ObjectGoalSensor
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.common.tensor_dict import TensorDict
-from habitat_baselines.config.default_structured_configs import (
-    PolicyConfig,
-)
+from habitat_baselines.config.default_structured_configs import PolicyConfig
 from habitat_baselines.rl.ppo.policy import PolicyActionData
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig
@@ -49,13 +47,6 @@ MP3D_ID_TO_NAME = [
     "seating",
     "clothes",
 ]
-
-
-class TorchActionIDs:
-    STOP = torch.tensor([[0]], dtype=torch.long)
-    MOVE_FORWARD = torch.tensor([[1]], dtype=torch.long)
-    TURN_LEFT = torch.tensor([[2]], dtype=torch.long)
-    TURN_RIGHT = torch.tensor([[3]], dtype=torch.long)
 
 
 class HabitatMixin:
@@ -239,6 +230,7 @@ class HabitatMixin:
 
 @baseline_registry.register_policy
 class OracleFBEPolicy(HabitatMixin, BaseObjectNavPolicy):
+
     def _explore(self, observations: TensorDict) -> Tensor:
         explorer_key = [k for k in observations.keys() if k.endswith("_explorer")][0]
         pointnav_action = observations[explorer_key]
@@ -247,6 +239,7 @@ class OracleFBEPolicy(HabitatMixin, BaseObjectNavPolicy):
 
 @baseline_registry.register_policy
 class SuperOracleFBEPolicy(HabitatMixin, BaseObjectNavPolicy):
+
     def act(
         self,
         observations: TensorDict,
@@ -272,26 +265,6 @@ class HabitatITMPolicyV2(HabitatMixin, ITMPolicyV2):
 
 
 @baseline_registry.register_policy
-class HabitatITMPolicyV3(HabitatMixin, ITMPolicyV3):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV4(HabitatMixin, ITMPolicyV4):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV5(HabitatMixin, ITMPolicyV5):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV6(HabitatMixin, ITMPolicyV6):
-    pass
-
-
-@baseline_registry.register_policy
 class HabitatITMPolicyV7(HabitatMixin, ITMPolicyV7):
     pass
 
@@ -307,27 +280,7 @@ class HabitatITMPolicyV9(HabitatMixin, ITMPolicyV9):
 
 
 @baseline_registry.register_policy
-class HabitatITMPolicyV2YOLOWORLD(HabitatMixin, ITMPolicyV2_YOLOWORLD):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV2YOLOv10(HabitatMixin, ITMPolicyV2_YOLOv10):
-    pass
-
-
-@baseline_registry.register_policy
 class HabitatITMPolicyV10(HabitatMixin, ITMPolicyV10):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV9YOLOv10(HabitatMixin, ITMPolicyV9_YOLOv10):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV9Fusion(HabitatMixin, ITMPolicyV9Fusion):
     pass
 
 
@@ -337,37 +290,7 @@ class HabitatITMPolicyV11(HabitatMixin, ITMPolicyV11):
 
 
 @baseline_registry.register_policy
-class HabitatITMPolicyV12(HabitatMixin, ITMPolicyV12):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV13(HabitatMixin, ITMPolicyV13):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV14(HabitatMixin, ITMPolicyV14):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV15(HabitatMixin, ITMPolicyV15):
-    pass
-
-
-@baseline_registry.register_policy
 class HabitatITMPolicyV16(HabitatMixin, ITMPolicyV16):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV17(HabitatMixin, ITMPolicyV17):
-    pass
-
-
-@baseline_registry.register_policy
-class HabitatITMPolicyV18(HabitatMixin, ITMPolicyV18):
     pass
 
 
@@ -399,11 +322,6 @@ class HabitatITMPolicyV23(HabitatMixin, ITMPolicyV23):
 @baseline_registry.register_policy
 class HabitatITMPolicyV24(HabitatMixin, ITMPolicyV24):
     pass
-
-
-# @baseline_registry.register_policy
-# class HabitatITMPolicyV20(HabitatMixin, ITMPolicyV20):
-#     pass
 
 
 @dataclass
