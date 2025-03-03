@@ -301,6 +301,10 @@ class ITMPolicy(BaseITMPolicy):
 
 
 class ITMPolicyV2(BaseITMPolicy):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._itm = BLIP2ITMClient(port=int(os.environ.get("BLIP2ITM_PORT", "12182")))
+
     def act(
         self,
         observations: Dict,
